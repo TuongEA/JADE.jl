@@ -764,7 +764,7 @@ function load_model_parameters(model::String, policy::String)
 end
 
 function load_model_parameters(path::String)
-    if ':' ∉ path
+    if !isabspath(path)
         path = joinpath(@JADE_DIR, "Output", path, "rundata.json")
     end
 
