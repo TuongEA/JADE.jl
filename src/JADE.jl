@@ -7,26 +7,16 @@
 
 module JADE
 
-import CSV
-import JSON
-import JuMP
-import Random
-import Statistics
-import SDDP
+using DataFrames, JuMP, SDDP, Random, DelimitedFiles, JSON
 
 const SECONDSPERHOUR = 3600
 const WEEKSPERYEAR = 52
 
-"""
-    @__JADE_DIR__
-
-Get the current location of the `ENV["JADE_DIR"]` variable set by the user.
-
-This could have been a function, but we use a macro with double underscores to
-match `@__DIR__` and `@__FILE__`.
-"""
-macro __JADE_DIR__()
-    return esc(:(get(ENV, "JADE_DIR", "")::String))
+macro JADE_DIR()
+    ex = quote
+        get(ENV, "JADE_DIR", "")::String
+    end
+    return esc(ex)
 end
 
 JSON.lower(t::SDDP.Expectation) = (1.0, 1.0)
@@ -42,6 +32,7 @@ include("results.jl")             # functions for writing results to file
 include("solve.jl")
 include("simulate.jl")
 include("visualise.jl")
+include("sddp_modifications.jl")
 
 export JADEdata,
     JADEmodel,

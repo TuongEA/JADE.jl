@@ -44,13 +44,13 @@ function optimize_policy!(
     check_settings_compatibility(rundata = d.rundata, solveoptions = solveoptions)
 
     if solveoptions.savedcuts != ""
-        cuts_path = joinpath(@__JADE_DIR__, "Output", solveoptions.savedcuts, "cuts.json")
+        cuts_path = joinpath(@JADE_DIR, "Output", solveoptions.savedcuts, "cuts.json")
         if isfile(cuts_path) && solveoptions.warmstart_cuts
             previous_rundata = load_model_parameters(solveoptions.savedcuts)
         end
     else
         cuts_path = joinpath(
-            @__JADE_DIR__,
+            @JADE_DIR,
             "Output",
             d.rundata.data_dir,
             d.rundata.policy_dir,
@@ -73,7 +73,7 @@ function optimize_policy!(
         final_week = mod(d.rundata.start_wk + d.rundata.number_of_wks - 2, 52) + 1
 
         cuts_path = joinpath(
-            @__JADE_DIR__,
+            @JADE_DIR,
             "Input",
             d.rundata.data_dir,
             "EOH",
@@ -88,7 +88,7 @@ function optimize_policy!(
 
         previous_rundata = load_model_parameters(
             joinpath(
-                @__JADE_DIR__,
+                @JADE_DIR,
                 "Input",
                 d.rundata.data_dir,
                 "EOH",
@@ -97,16 +97,8 @@ function optimize_policy!(
         )
 
         check_rundata(d.rundata, previous_rundata, :eoh)
-        bf = sddpm[final_week].bellman_function
-        if JuMP.has_upper_bound(bf.global_theta.theta)
-            JuMP.delete_upper_bound(bf.global_theta.theta)
-        end
-        SDDP.read_cuts_from_file(
-            sddpm,
-            cuts_path;
-            node_name_parser = (::Type{Int}, node) ->
-                node == "$final_week" ? d.rundata.number_of_wks : nothing,
-        )
+
+        JADE.read_finalcuts_from_file(sddpm, cuts_path, final_week, d.rundata.number_of_wks)
     elseif isfile(cuts_path)
         if solveoptions.warmstart_cuts
             if length(sddpm.nodes[1].bellman_function.global_theta.cuts) == 0 ||
@@ -114,10 +106,10 @@ function optimize_policy!(
                 @info("Loading cuts from " * cuts_path)
                 check_rundata(d.rundata, previous_rundata, :full)
                 SDDP.read_cuts_from_file(sddpm, cuts_path)
-                if JuMP.has_upper_bound(
+                if has_upper_bound(
                     sddpm.nodes[d.rundata.number_of_wks].bellman_function.global_theta.theta,
                 )
-                    JuMP.delete_upper_bound(
+                    delete_upper_bound(
                         sddpm.nodes[d.rundata.number_of_wks].bellman_function.global_theta.theta,
                     )
                 end
@@ -131,7 +123,7 @@ function optimize_policy!(
                 @info("Existing cuts detected in model; these cuts will be retained")
             end
             cuts_path = joinpath(
-                @__JADE_DIR__,
+                @JADE_DIR,
                 "Output",
                 d.rundata.data_dir,
                 d.rundata.policy_dir,
@@ -166,7 +158,7 @@ function optimize_policy!(
         if solveoptions.fractionMC != 1.0
             sequences = Vector{Vector{Int}}
             seq_path = joinpath(
-                @__JADE_DIR__,
+                @JADE_DIR,
                 "Input",
                 d.rundata.data_dir,
                 solveoptions.custom_inflow_file,
@@ -268,13 +260,13 @@ function optimize_policy!(
                 sddpm,
                 iteration_limit = solveoptions.iterations,
                 cut_deletion_minimum = solveoptions.cutselection,
-                sampling_scheme = SDDP.Historical(sample_paths; terminate_on_cycle = true),
+                sampling_scheme = WrapHistorical(sample_paths),
                 cycle_discretization_delta = 10.0,
                 dashboard = false,
                 risk_measure = solveoptions.riskmeasure,
                 parallel_scheme = parallel_scheme,
                 print_level = print_level,
-                forward_pass = SDDP.DefaultForwardPass(; include_last_node = false),
+                forward_pass = JADEForwardPass(),
             )
         else
             solveresults = SDDP.train(
@@ -286,6 +278,7 @@ function optimize_policy!(
                 risk_measure = solveoptions.riskmeasure,
                 parallel_scheme = parallel_scheme,
                 print_level = print_level,
+                forward_pass = JADEForwardPass(),
             )
         end
         # Save cuts to a file

@@ -5,6 +5,8 @@
 #  If a copy of the MPL was not distributed with this file, You can obtain one at
 #  http://mozilla.org/MPL/2.0/.
 
+using Random
+
 """
 	simulate(JADEmodel::JADEModel, parameters::JADESimulation)
 
@@ -34,13 +36,8 @@ function simulate(JADEmodel::JADEModel, parameters::JADESimulation)
         joinpath("Input", d.rundata.data_dir)
     )
 
-    cuts_path = joinpath(
-        @__JADE_DIR__,
-        "Output",
-        d.rundata.data_dir,
-        d.rundata.policy_dir,
-        "cuts.json",
-    )
+    cuts_path =
+        joinpath(@JADE_DIR, "Output", d.rundata.data_dir, d.rundata.policy_dir, "cuts.json")
 
     if length(sddpm.nodes[1].bellman_function.global_theta.cuts) == 0
         if isfile(cuts_path)
@@ -52,10 +49,10 @@ function simulate(JADEmodel::JADEModel, parameters::JADESimulation)
                 load_model_parameters(d.rundata.data_dir, d.rundata.policy_dir)
             check_rundata(d.rundata, previous_rundata, :partial)
             SDDP.read_cuts_from_file(sddpm, cuts_path)
-            if JuMP.has_upper_bound(
+            if has_upper_bound(
                 sddpm.nodes[d.rundata.number_of_wks].bellman_function.global_theta.theta,
             )
-                JuMP.delete_upper_bound(
+                delete_upper_bound(
                     sddpm.nodes[d.rundata.number_of_wks].bellman_function.global_theta.theta,
                 )
             end
@@ -94,7 +91,7 @@ function simulate(JADEmodel::JADEModel, parameters::JADESimulation)
                 d.rundata.scale_reservoirs,
     )
 
-    initial_state = Dict(String(k) => v for (k, v) in JADEmodel.sddpm.initial_root_state)
+    initial_state = SDDP._initial_state(JADEmodel.sddpm)
     if parameters.initial_state == nothing
         @info("Using default initial reservoir levels")
     else
@@ -154,9 +151,9 @@ function simulate(JADEmodel::JADEModel, parameters::JADESimulation)
                 parameters.replications,
                 get_primal,
                 custom_recorders = get_dual,
-                sampling_scheme = SDDP.InSampleMonteCarlo(
+                sampling_scheme = InSampleMonteCarlo2(
                     max_depth = wks,
-                    initial_node = parameters.initial_stage,
+                    initial_stage = parameters.initial_stage,
                     terminate_on_cycle = false,
                     terminate_on_dummy_leaf = false,
                 ),
@@ -190,9 +187,9 @@ function simulate(JADEmodel::JADEModel, parameters::JADESimulation)
                 1,
                 get_primal,
                 custom_recorders = get_dual,
-                sampling_scheme = SDDP.InSampleMonteCarlo(
+                sampling_scheme = InSampleMonteCarlo2(
                     max_depth = wks * parameters.replications,
-                    initial_node = parameters.initial_stage,
+                    initial_stage = parameters.initial_stage,
                     terminate_on_cycle = false,
                     terminate_on_dummy_leaf = false,
                 ),
@@ -236,6 +233,7 @@ function simulate(JADEmodel::JADEModel, parameters::JADESimulation)
     elseif parameters.sim_type == :historical
         sequence = nothing
         results = Vector{Dict{Symbol,Any}}[]
+
         if !d.rundata.steady_state || parameters.reset_starting_levels == true
             sample_paths = Vector{Tuple{Int,Dict{Symbol,Float64}}}[]
             push!(sample_paths, Tuple{Int,Dict{Symbol,Float64}}[])
@@ -322,7 +320,7 @@ function simulate(JADEmodel::JADEModel, parameters::JADESimulation)
                     if (t + d.rundata.start_wk - 2) % WEEKSPERYEAR == WEEKSPERYEAR - 1
                         i += 1
                     end
-                    push!(sample_path, ((t - 1) % WEEKSPERYEAR + 1, s_inflows))
+                    push!(sample_paths[end], ((t - 1) % WEEKSPERYEAR + 1, s_inflows))
                 end
             end
             sequence = SDDP.simulate(

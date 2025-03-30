@@ -34,7 +34,7 @@ data files.
 `run_file` is the name of the csv file that contains the parameters we wish to load.
 """
 function define_JADE_model(inputdir::String; run_file::String = "run")
-    file = joinpath(@__JADE_DIR__, "Input", inputdir, run_file * ".csv")
+    file = joinpath(@JADE_DIR, "Input", inputdir, run_file * ".csv")
     run_options = parse_run_options(file)
 
     # Scaling factor for reservoir volume
@@ -264,7 +264,7 @@ is located.
 `run_file` is the name of the csv file containing the parameters for the simulation.
 """
 function define_JADE_simulation(inputdir::String; run_file = "run")
-    file = joinpath(@__JADE_DIR__, "Input", inputdir, run_file * ".csv")
+    file = joinpath(@JADE_DIR, "Input", inputdir, run_file * ".csv")
     run_options = parse_run_options(file)
 
     reset_starting_levels = :default
@@ -537,7 +537,7 @@ is located.
 `run_file` is the name of the csv file containing the parameters for the simulation.
 """
 function define_JADE_solve_options(inputdir::String; run_file = "run")
-    file = joinpath(@__JADE_DIR__, "Input", inputdir, run_file * ".csv")
+    file = joinpath(@JADE_DIR, "Input", inputdir, run_file * ".csv")
     run_options = parse_run_options(file)
 
     riskmeasure = (0.0, 1.0)
@@ -764,14 +764,18 @@ function load_model_parameters(model::String, policy::String)
 end
 
 function load_model_parameters(path::String)
-    if !isfile(path)
-        path = joinpath(@__JADE_DIR__, "Output", path, "rundata.json")
+    if ':' ∉ path
+        path = joinpath(@JADE_DIR, "Output", path, "rundata.json")
     end
 
     if !ispath(path)
         error("Parameters for JADE model not found: $path.")
     end
-    data = JSON.parsefile(path)
+    open(path, "r") do f
+        global data
+        dicttxt = read(f, String)  # file information to string
+        return data = JSON.parse(dicttxt)  # parse and transform data
+    end
 
     decisionrules = DecisionRule[]
 
@@ -816,12 +820,17 @@ function load_model_parameters(path::String)
 end
 
 function load_solve_parameters(model::String, policy::String)
-    path = joinpath(@__JADE_DIR__, "Output", model, policy, "solveoptions.json")
+    path = joinpath(@JADE_DIR, "Output", model, policy, "solveoptions.json")
 
     if !ispath(path)
         error("Solve options not found in Output" * joinpath("Output", model, policy))
     end
-    data = JSON.parsefile(path)
+    open(path, "r") do f
+        global data
+        dicttxt = read(f, String)  # file information to string
+        return data = JSON.parse(dicttxt)  # parse and transform data
+    end
+    #return data
     risk = data["riskmeasure"]
     if risk[1] > 0.0 && risk[2] < 1.0
         riskmeasure = SDDP.EAVaR(lambda = (1 - risk[1]), beta = risk[2])
@@ -846,12 +855,16 @@ function load_solve_parameters(model::String, policy::String)
 end
 
 function load_simulation_parameters(model::String, policy::String, simulation::String)
-    path =
-        joinpath(@__JADE_DIR__, "Output", model, policy, simulation, "sim_parameters.json")
+    path = joinpath(@JADE_DIR, "Output", model, policy, simulation, "sim_parameters.json")
     if !ispath(path)# || !ispath(joinpath(data_dir,rundata.json))
         error("Parameters for simulation not found")
     end
-    data = JSON.parsefile(path)
+    open(path, "r") do f
+        global data
+        dicttxt = read(f, String)  # file information to string
+        return data = JSON.parse(dicttxt)  # parse and transform data
+    end
+
     if haskey(data, "sim_years") &&
        data["sim_years"] != nothing &&
        length(data["sim_years"]) > 0
@@ -1142,7 +1155,6 @@ function check_settings_compatibility(;
         end
 
         if simulation.sim_type == :historical &&
-           simulation.sim_years !== nothing &&
            length(simulation.sim_years) != simulation.replications
             errors *= "\n'replications' in a historical simulation must match the number of 'sim_years'"
         end
@@ -1180,7 +1192,7 @@ a `scenario_dir` then the first directory to search is <data_dir>/data_files/<sc
 `verbose` if set to `true` the function will print info to the REPL.
 """
 function get_file_directory(x::String, rundata::RunData; verbose::Bool = true)
-    input_directory = joinpath(@__JADE_DIR__, "Input", rundata.data_dir)
+    input_directory = joinpath(@JADE_DIR, "Input", rundata.data_dir)
 
     if rundata.scenario_dir != "" &&
        !isdir(joinpath(input_directory, "data_files", rundata.scenario_dir))
