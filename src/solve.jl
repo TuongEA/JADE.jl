@@ -5,6 +5,12 @@
 #  If a copy of the MPL was not distributed with this file, You can obtain one at
 #  http://mozilla.org/MPL/2.0/.
 
+using TimerOutputs  # Ensure TimerOutputs is available
+
+if !isdefined(SDDP, :SDDP_TIMER)
+    global SDDP_TIMER = TimerOutput()  # Create a new timer
+end
+
 """
     optimize_policy!(
         JADEmodel::JADEModel,
