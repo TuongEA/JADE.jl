@@ -1,6 +1,3 @@
-using SDDP
-SDDP.SDDP_TIMER = SDDP.TimerOutputs.TimerOutput()
-
 """
 	function read_finalcuts_from_file(
 		model::SDDP.PolicyGraph{T},
@@ -316,10 +313,10 @@ function SDDP.forward_pass(
 ) where {T}
     # First up, sample a scenario. Note that if a cycle is detected, this will
     # return the cycle node as well.
-    SDDP.TimerOutputs.@timeit SDDP.SDDP_TIMER "sample_scenario" begin
+    # SDDP.TimerOutputs.@timeit SDDP.SDDP_TIMER "sample_scenario" begin
         scenario_path, terminated_due_to_cycle =
             SDDP.sample_scenario(model, options.sampling_scheme)
-    end
+    # end
 
     if terminated_due_to_cycle
         final_node = scenario_path[end]
@@ -353,7 +350,7 @@ function SDDP.forward_pass(
         end
         # ===== End: starting state for infinite horizon =====
         # Solve the subproblem, note that `require_duals = false`.
-        SDDP.TimerOutputs.@timeit SDDP.SDDP_TIMER "solve_subproblem" begin
+        # SDDP.TimerOutputs.@timeit SDDP.SDDP_TIMER "solve_subproblem" begin
             subproblem_results = SDDP.solve_subproblem(
                 model,
                 node,
@@ -362,7 +359,7 @@ function SDDP.forward_pass(
                 scenario_path[1:depth],
                 duality_handler = nothing,
             )
-        end
+        # end
         # Cumulate the stage_objective.
         cumulative_value += subproblem_results.stage_objective
 
