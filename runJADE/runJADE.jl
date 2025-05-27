@@ -44,5 +44,5 @@ if simulation
 end
 
 ## Visualise simulation
-JADE.plot_storage(results, data_dir * "-" * runfile * "-" * sim_settings.sim_dir)
-JADE.plot_prices(results, data_dir * "-" * runfile * "-" * sim_settings.sim_dir)
+#JADE.plot_storage(results, data_dir * "-" * runfile * "-" * sim_settings.sim_dir)
+#JADE.plot_prices(results, data_dir * "-" * runfile * "-" * sim_settings.sim_dir)
