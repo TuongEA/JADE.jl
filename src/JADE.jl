@@ -7,10 +7,15 @@
 
 module JADE
 
-using DataFrames, JuMP, SDDP, Random, DelimitedFiles, JSON
+import CSV
+import JSON
+import JuMP
+import Random
+import Statistics
+# import SDDP
+using SDDP
+#using DelimitedFiles
 
-const SECONDSPERHOUR = 3600
-const WEEKSPERYEAR = 52
 
 macro JADE_DIR()
     ex = quote
@@ -19,12 +24,17 @@ macro JADE_DIR()
     return esc(ex)
 end
 
+macro __JADE_DIR__()
+    return esc(:(get(ENV, "JADE_DIR", "")::String))
+end
+
 JSON.lower(t::SDDP.Expectation) = (1.0, 1.0)
 function JSON.lower(t::T where {T<:SDDP.ConvexCombination})
     return (t.measures[1][1], t.measures[2][2].β)
 end
 
 include("structs.jl")
+include("time.jl")
 include("data.jl")                # data file of JADE
 include("utilities.jl")
 include("model.jl")               # model file of JADE

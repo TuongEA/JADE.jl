@@ -36,11 +36,7 @@ function computefixed(fixed_file::String, demand, outage_data, T)
             tp = TimePoint(parse(Int, items[3]), parse(Int, items[4]))
             for (i, blk) in enumerate(blocks)
                 if haskey(all_demand_reduction, (station, node, blk))
-                    error(
-                        "Fixed generator " *
-                        string(station) *
-                        " defined for both single TimePeriods and all periods.",
-                    )
+                    error("Fixed generator " * string(station) * " defined for both single TimePeriods and all periods.")
                 end
                 if !haskey(tp_demand_reduction, (station, node, blk))
                     tp_demand_reduction[(station, node, blk)] = Dict{TimePoint,Float64}()
@@ -53,11 +49,7 @@ function computefixed(fixed_file::String, demand, outage_data, T)
         else
             for (i, blk) in enumerate(blocks)
                 if haskey(tp_demand_reduction, (station, node, blk))
-                    error(
-                        "Fixed generator " *
-                        string(station) *
-                        " defined for both single TimePeriods and all periods.",
-                    )
+                    error("Fixed generator " * string(station) * " defined for both single TimePeriods and all periods.")
                 end
                 if !haskey(all_demand_reduction, (station, node, blk))
                     all_demand_reduction[(station, node, blk)] = 0.0
@@ -98,15 +90,9 @@ function computefixed(fixed_file::String, demand, outage_data, T)
     return fixed
 end
 
-function getfixedgeneration(
-    fixed_file::String,
-    years::Vector{Int},
-    weeks::Vector{Int},
-    loadblocks::Vector{Symbol},
-    demand::TimeSeries{Dict{Tuple{Symbol,Symbol},Float64}},
-    outage_data::TimeSeries{Dict{Tuple{Symbol,Symbol},Float64}},
-    T::TimeSeries{Dict{Symbol,Float64}},
-)
+function getfixedgeneration(fixed_file::String, years::Vector{Int}, weeks::Vector{Int}, loadblocks::Vector{Symbol},
+                            demand::TimeSeries{Dict{Tuple{Symbol,Symbol},Float64}}, outage_data::TimeSeries{Dict{Tuple{Symbol,Symbol},Float64}},
+                            T::TimeSeries{Dict{Symbol,Float64}})
     tp_demand_reduction = Dict{Tuple{Symbol,Symbol,Symbol},Dict{TimePoint,Float64}}()
 
     parsefile(fixed_file, true) do items
