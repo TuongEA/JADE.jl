@@ -370,6 +370,8 @@ end
 mutable struct JADEData
     rundata::RunData                                   
     thermal_stations::Dict{Symbol,ThermalStation}
+    fuel_storages::Dict{NTuple{2,Symbol},FuelStorage}
+    thermal_to_storage::Dict{Symbol,NTuple{2,Symbol}}
     hydro_stations::Dict{Symbol,HydroStation}
     reservoirs::Dict{Symbol,Reservoir}
     fuel_costs::TimeSeries{Dict{Symbol,Float64}}
@@ -417,9 +419,16 @@ function JADEdata(rundata::RunData)
     demand, sets.NODES = getdemand(filedir("demand.csv"), durations)
     checkdemands(durations, demand, rundata)
 
+    @info("Input fuel storages")
+    fuel_storages = getfuelstorage(filedir("fuel_storages.csv"))
+    sets.STORED_FUELS = collect(keys(fuel_storages))
+
     @info("Input thermal stations")
     thermal_stations = getthermalstations(filedir("thermal_stations.csv"), sets.NODES)
     sets.THERMALS = collect(keys(thermal_stations))
+
+    @info("Input station - fuel storages mapping")
+    thermal_to_storage = get_station_fuelstorage_mapping(filedir("thermal_stations_fuel_storage.csv"), sets.STORED_FUELS)
 
     @info("Input hydro stations")
     hydro_stations, station_arcs = gethydros(filedir("hydro_stations.csv"), sets.NODES)
@@ -623,6 +632,8 @@ function JADEdata(rundata::RunData)
     return JADEData(
         rundata,
         thermal_stations,
+        fuel_storages,
+        thermal_to_storage,
         hydro_stations,
         reservoirs,
         fuel_costs,

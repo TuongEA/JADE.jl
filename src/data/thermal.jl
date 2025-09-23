@@ -19,8 +19,10 @@ struct ThermalStation
 end
 
 struct FuelStorage
-    initial::Float64    # initial storage (TJ)
-    maximum::Float64    # maximum storage (TJ)
+    initial::Float64       # initial storage (TJ)
+    capacity::Float64      # maximum storage (TJ)
+    maxinjection::Float64  # maximum weekly injection (TJ/week)
+    maxwithdrawal::Float64 # maximum weekly withdrawal (TJ/week)
 end
 
 """
@@ -70,6 +72,91 @@ function getthermalstations(filename::String, nodes::Vector{Symbol})
 end
 
 """
+    getfuelstorage(file::String, nodes::Vector{Symbol})
+
+    # Description
+
+    Read fuel storage data from `file`.
+    The columns MUST be ordered as shown below.
+
+    # Example File
+
+        % Initial storage in (TJ)
+        % Capacity in (TJ) - ignore this if we only model the total avaialble fuel.
+        % Max Injection in (TJ/week) - ignore this if we only model the total avaialble fuel.
+        % Max Withdraw in (TJ/week) - ignore this if we only model the total avaialble fuel.
+        TRADER,FUEL,INITIAL,CAPACITY,MAX_INJECTION,MAX_WITHDRAW
+        GENE,coal,23500,na,na,na
+        GENE,gas,14389,na,na,na
+        CTCT,gas,13303,na,na,na
+        TODD,gas,8787,na,na,na
+"""
+function getfuelstorage(filename::String)
+    storages = Dict{NTuple{2,Symbol},FuelStorage}()
+
+    for row in CSV.Rows(filename; missingstring = ["NA", "na", "default"], stripwhitespace = true, comment = "%")
+
+        row = _validate_and_strip_trailing_comment(row, [:TRADER,:FUEL,:INITIAL,:CAPACITY,:MAX_INJECTION,:MAX_WITHDRAW])
+
+        key = (str2sym(row.TRADER), str2sym(row.FUEL))
+        if haskey(storages, key)
+            error("Storage $(key) given twice.")
+        end
+
+        initial = parse(Float64, coalesce(row.INITIAL, "0.0"))
+        capacity = parse(Float64, coalesce(row.CAPACITY, "Inf"))
+        maxinjection = parse(Float64, coalesce(row.MAX_INJECTION, "Inf"))
+        maxwithdrawal = parse(Float64, coalesce(row.MAX_WITHDRAW, "Inf"))
+
+        storages[key] = FuelStorage(initial,capacity,maxinjection,maxwithdrawal)
+    end
+
+    return storages
+end
+
+"""
+    get_station_fuelstorage_mapping(file::String, fuel_storages::Vector{NTuple{2,Symbol}})
+
+    # Description
+
+    Read station - fuel storage mapping data from `file`.
+    The columns MUST be ordered as shown below.
+
+    # Example File
+
+        % Thermal station - fuel storage mapping (can be integrated into thermal_station.csv data)
+        GENERATOR,TRADER,FUEL
+        Huntly_main_g1,GENE,coal
+        Huntly_main_g2,GENE,coal
+        Huntly_main_g4,GENE,coal
+        Huntly_e3p,GENE,gas
+        Huntly_peaker,GENE,gas
+        Stratford_220KV,CTCT,gas
+        Stratford_peakers,CTCT,gas
+        McKee_peakers,TODD,gas
+        Junction_Road,TODD,gas
+"""
+function get_station_fuelstorage_mapping(filename::String, fuel_storages::Vector{NTuple{2,Symbol}})
+    stations_storage = Dict{Symbol,NTuple{2,Symbol}}()
+
+    for row in CSV.Rows(filename; missingstring = ["NA", "na", "default"], stripwhitespace = true, comment = "%")
+        row = _validate_and_strip_trailing_comment(row,  [:GENERATOR,:TRADER,:FUEL])
+
+        station = str2sym(row.GENERATOR)
+        if haskey(stations_storage, station)
+            error("Thermal Station ($station) already given.")
+        end
+
+        fuelstorage = (str2sym(row.TRADER), str2sym(row.FUEL))
+        if !(fuelstorage in fuel_storages)
+            error("Fuel storage $fuelstorage for generator $station not found")
+        end
+
+        stations_storage[station] = (str2sym(row.TRADER), str2sym(row.FUEL))
+    end
+    return stations_storage
+end
+"""
     getfuelcosts(file::String)
 
     # Description
@@ -112,7 +199,6 @@ function getfuelcosts(filename::String)
     end
     return TimeSeries{Dict{Symbol,Float64}}(start_time, data), carbon_content
 end
-
 
 function getfuelandcarboncosts(filename::String)
     start_time = nothing

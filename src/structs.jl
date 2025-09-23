@@ -95,17 +95,29 @@ mutable struct Sets
     CATCHMENTS::Vector{Symbol}              # all junctions and reservoirs
     HYDROS::Vector{Symbol}                  # hydro power stations
     CATCHMENTS_WITH_INFLOW::Vector{Symbol}  # locations with inflow data
-    JUNCTIONS_WITHOUT_INFLOW::Vector{Symbol}
+    JUNCTIONS_WITHOUT_INFLOW::Vector{Symbol}# locations with no inflow
     NATURAL_ARCS::Vector{NTuple{2,Symbol}}  # arcs independent of hydro stations
     STATION_ARCS::Vector{NTuple{2,Symbol}}  # origin and destination of water for a hydro station
     TRANS_ARCS::Vector{NTuple{2,Symbol}}    # power transmission arcs
+    STORED_FUELS::Vector{NTuple{2,Symbol}}  # Fuel storages (can store either gas or coal)
 end
 
 # function to initialise JADE sets
 function Sets()
-    return Sets(Symbol[], Symbol[], Symbol[], Symbol[], Symbol[], 
-                Symbol[], Symbol[], Symbol[], Symbol[], Symbol[], 
-                NTuple{2,Symbol}[], NTuple{2,Symbol}[], NTuple{2,Symbol}[],
+    return Sets(Symbol[], 
+                Symbol[], 
+                Symbol[], 
+                Symbol[], 
+                Symbol[], 
+                Symbol[], 
+                Symbol[], 
+                Symbol[], 
+                Symbol[], 
+                Symbol[], 
+                NTuple{2,Symbol}[], 
+                NTuple{2,Symbol}[], 
+                NTuple{2,Symbol}[],
+                NTuple{2,Symbol}[]
     )
 end
 
