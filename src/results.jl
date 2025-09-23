@@ -367,7 +367,7 @@ end
 
 function write_DOASA_cuts(sddpm::SDDP.PolicyGraph, d::JADEData, path::String)
     !ispath(path) && mkpath(path)
-
+    
     for t in keys(sddpm.nodes)
         oracle = sddpm.nodes[t].bellman_function.global_theta
         states = sddpm.nodes[t].bellman_function.global_theta.states
@@ -379,14 +379,22 @@ function write_DOASA_cuts(sddpm::SDDP.PolicyGraph, d::JADEData, path::String)
         end
 
         for s in states
+            
             if findfirst("reslevel[", string(s)) != nothing
                 s_sym = Symbol(string(s)[10:end-1])
                 states_ordered[d.reservoirs[s_sym].index] = s
-            else
+
+            elseif findfirst("fuelstoragelevel[", string(s)) != nothing
+                s_sym = string(s)[20:end-2]                 # Get substring from fuelstoragelevel[(:GENE, :GAS)] => GENE, :GAS
+                s_sym = replace(s_sym," :" =>"")            # Repalce " :" by "" --> GENE, :GAS => GEN,GAS
+                parts = split(s_sym, ",")                   # Split GEN,GAS => parts[1] = GEN and parts[2] = GAS
+                s_sym = Symbol(parts[1]), Symbol(parts[2])  # Define Tuple{Symbol,Symbol} => (:GENE, :GAS)
+               
+                states_ordered[length(d.sets.RESERVOIRS) + findfirst(isequal(s_sym), d.sets.STORED_FUELS)] = s
+            
+            else # Not sure the use of this
                 s_sym = Symbol(string(s)[14:end-1])
-                states_ordered[length(
-                    d.sets.RESERVOIRS,
-                )+findfirst(isequal(s_sym), d.sets.STORED_FUELS)] = s
+                states_ordered[length(d.sets.RESERVOIRS,) + findfirst(isequal(s_sym), d.sets.STORED_FUELS)] = s
             end
         end
 
