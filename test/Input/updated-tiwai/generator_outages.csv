@@ -1,5 +1,0 @@
-% Power station outages (zero outages in 2019)
-% (reduction in MW capacity).
-YEAR,WEEK,LOADBLOCK,STATION,OUTAGE
-all,all,all,Huntly_main_g3,250
-all,all,all,Huntly_main_g4,250

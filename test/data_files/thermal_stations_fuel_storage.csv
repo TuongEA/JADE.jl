@@ -1,0 +1,11 @@
+% Thermal station - fuel storage mapping (can be integrated into thermal_station.csv data)
+GENERATOR,FUELSTORAGE
+Huntly_main_g1,GENE_coal
+Huntly_main_g2,GENE_coal
+Huntly_main_g4,GENE_coal
+Huntly_e3p,GENE_gas
+Huntly_peaker,GENE_gas
+Stratford_220KV,CTCT_gas
+Stratford_peakers,CTCT_gas
+McKee_peakers,TODD_gas
+Junction_Road,TODD_gas
