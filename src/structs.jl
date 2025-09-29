@@ -90,6 +90,7 @@ mutable struct Sets
     NODES::Vector{Symbol}                   # power system nodes
     SECTORS::Vector{Symbol}                 # load sectors
     THERMALS::Vector{Symbol}                # thermal power stations
+    STORED_FUELS::Vector{Symbol}            # Fuel storages (can store either gas or coal)
     RESERVOIRS::Vector{Symbol}              # reservoirs (can store water)
     JUNCTIONS::Vector{Symbol}               # hydro junctions
     CATCHMENTS::Vector{Symbol}              # all junctions and reservoirs
@@ -99,7 +100,6 @@ mutable struct Sets
     NATURAL_ARCS::Vector{NTuple{2,Symbol}}  # arcs independent of hydro stations
     STATION_ARCS::Vector{NTuple{2,Symbol}}  # origin and destination of water for a hydro station
     TRANS_ARCS::Vector{NTuple{2,Symbol}}    # power transmission arcs
-    STORED_FUELS::Vector{NTuple{2,Symbol}}  # Fuel storages (can store either gas or coal)
 end
 
 # function to initialise JADE sets
@@ -114,10 +114,10 @@ function Sets()
                 Symbol[], 
                 Symbol[], 
                 Symbol[], 
+                Symbol[],
                 NTuple{2,Symbol}[], 
                 NTuple{2,Symbol}[], 
                 NTuple{2,Symbol}[],
-                NTuple{2,Symbol}[]
     )
 end
 

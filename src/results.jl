@@ -385,11 +385,7 @@ function write_DOASA_cuts(sddpm::SDDP.PolicyGraph, d::JADEData, path::String)
                 states_ordered[d.reservoirs[s_sym].index] = s
 
             elseif findfirst("fuelstoragelevel[", string(s)) != nothing
-                s_sym = string(s)[20:end-2]                 # Get substring from fuelstoragelevel[(:GENE, :GAS)] => GENE, :GAS
-                s_sym = replace(s_sym," :" =>"")            # Repalce " :" by "" --> GENE, :GAS => GEN,GAS
-                parts = split(s_sym, ",")                   # Split GEN,GAS => parts[1] = GEN and parts[2] = GAS
-                s_sym = Symbol(parts[1]), Symbol(parts[2])  # Define Tuple{Symbol,Symbol} => (:GENE, :GAS)
-               
+                s_sym = Symbol(string(s)[18:end-1])           # Get substring from fuelstoragelevel[GENE_GAS] => :GENE_GAS            
                 states_ordered[length(d.sets.RESERVOIRS) + findfirst(isequal(s_sym), d.sets.STORED_FUELS)] = s
             
             else # Not sure the use of this

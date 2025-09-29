@@ -120,7 +120,7 @@ function JADEsddp(d::JADEData, optimizer = nothing)
                 
                 thermal_use[s.THERMALS, s.BLOCKS] >= 0           # Amount of thermal energy used, in MW
                 
-                fuel_contract[s.STORED_FUELS] == 0               # Amount of fuel delivered according to fuel contract, in TJ (ignore fuel contract for now)
+                fuel_contract[s.STORED_FUELS] >= 0               # Amount of fuel delivered according to fuel contract, in TJ (ignore fuel contract for now)
                 fuel_injection[s.STORED_FUELS] >= 0              # Amount of fuel injected into storage, in TJ (ignore max injection constraints)
                 fuel_withdrawal[s.STORED_FUELS] >= 0             # Amount of fuel withdrawn from storage, in TJ (ignore max withdrawal constraints) 
 
@@ -308,6 +308,10 @@ function JADEsddp(d::JADEData, optimizer = nothing)
                 # Fuel use/storage balance constraints
                 fuelUseBalance[sf in s.STORED_FUELS],
                 fuel_contract[sf] + fuel_withdrawal[sf] - fuel_injection[sf] >= fuel_use_TJ[sf]
+
+                # Fuel contracts
+                fuelContractDelivery[sf in s.STORED_FUELS],
+                fuel_contract[sf] == d.fuel_contracts[timenow][sf] 
                 
                 # Conservation for fuel storages
                 fuelStorageBalance[sf in s.STORED_FUELS],

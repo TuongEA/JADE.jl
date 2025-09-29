@@ -92,13 +92,13 @@ end
         TODD,gas,8787,na,na,na
 """
 function getfuelstorage(filename::String)
-    storages = Dict{NTuple{2,Symbol},FuelStorage}()
+    storages = Dict{Symbol,FuelStorage}()
 
     for row in CSV.Rows(filename; missingstring = ["NA", "na", "default"], stripwhitespace = true, comment = "%")
 
-        row = _validate_and_strip_trailing_comment(row, [:TRADER,:FUEL,:INITIAL,:CAPACITY,:MAX_INJECTION,:MAX_WITHDRAW])
+        row = _validate_and_strip_trailing_comment(row, [:FUELSTORAGE,:INITIAL,:CAPACITY,:MAX_INJECTION,:MAX_WITHDRAW])
 
-        key = (str2sym(row.TRADER), str2sym(row.FUEL))
+        key = str2sym(row.FUELSTORAGE)
         if haskey(storages, key)
             error("Storage $(key) given twice.")
         end
@@ -113,6 +113,26 @@ function getfuelstorage(filename::String)
 
     return storages
 end
+
+
+function getfuelcontracts(filename::String)
+    start_time = nothing
+    data = Dict{Symbol, Float64}[]
+    rows = CSV.Rows(filename; missingstring = ["NA", "na", "default"],stripwhitespace = true, comment = "%" )
+    for row in rows
+        time = TimePoint(parse(Int, row.YEAR), parse(Int, row.WEEK))
+        if isempty(data)
+            start_time = time
+        elseif time != start_time + length(data)
+            error("Weeks in $filename must be contiguous")
+        end
+        d = Dict{Symbol,Float64}(str2sym("$k") => parse(Float64, row[k]) for k in CSV.getnames(row) if !(k in (:YEAR, :WEEK)))
+        push!(data, d)
+    end
+    return TimeSeries{Dict{Symbol,Float64}}(start_time, data)
+end
+
+
 
 """
     get_station_fuelstorage_mapping(file::String, fuel_storages::Vector{NTuple{2,Symbol}})
@@ -136,23 +156,23 @@ end
         McKee_peakers,TODD,gas
         Junction_Road,TODD,gas
 """
-function get_station_fuelstorage_mapping(filename::String, fuel_storages::Vector{NTuple{2,Symbol}})
-    stations_storage = Dict{Symbol,NTuple{2,Symbol}}()
+function get_station_fuelstorage_mapping(filename::String, fuel_storages::Vector{Symbol})
+    stations_storage = Dict{Symbol,Symbol}()
 
     for row in CSV.Rows(filename; missingstring = ["NA", "na", "default"], stripwhitespace = true, comment = "%")
-        row = _validate_and_strip_trailing_comment(row,  [:GENERATOR,:TRADER,:FUEL])
+        row = _validate_and_strip_trailing_comment(row,  [:GENERATOR,:FUELSTORAGE])
 
         station = str2sym(row.GENERATOR)
         if haskey(stations_storage, station)
             error("Thermal Station ($station) already given.")
         end
 
-        fuelstorage = (str2sym(row.TRADER), str2sym(row.FUEL))
+        fuelstorage = str2sym(row.FUELSTORAGE)
         if !(fuelstorage in fuel_storages)
             error("Fuel storage $fuelstorage for generator $station not found")
         end
 
-        stations_storage[station] = (str2sym(row.TRADER), str2sym(row.FUEL))
+        stations_storage[station] = fuelstorage 
     end
     return stations_storage
 end
