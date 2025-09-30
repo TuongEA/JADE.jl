@@ -665,29 +665,37 @@ function backup_input_files(rundata::RunData)
     input_filenames = [
         "hours_per_block.csv",
         "demand.csv",
+        
         "thermal_stations.csv",
+        
         "hydro_stations.csv",
         "reservoirs.csv",
         "reservoir_limits.csv",
         "hydro_arcs.csv",
         "inflows.csv",
+        "terminal_water_value.csv",
+
         "line_outages.csv",
         "transmission_outages.csv",
         "transmission.csv",
+
         "generator_outages.csv",
         "station_outages.csv",
         "fixed_generation.csv",
-        "terminal_water_value.csv",
         "fixed_stations.csv",
-        "demand_response.csv",
+                
         "lost_load.csv",
         "demand_response.csv",
-        "lost_load.csv",
+        
+
         "thermal_fuel_costs.csv",
-        "thermal_fuel_storage.csv",
-        "thermal_fuel_supply.csv",
         "fuel_and_CO2_costs.csv",
         "fuel_CO2_contents.csv",
+
+        "thermal_stations_fuel_storage.csv",
+        "fuel_storages.csv",
+        "fuel_contracts.csv",
+
     ]
 
     out_path =

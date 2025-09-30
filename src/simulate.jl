@@ -65,12 +65,18 @@ function simulate(JADEmodel::JADEModel, parameters::JADESimulation)
         :lostloadcosts,
         :contingent_storage_cost,
         :carbon_emissions,
+
+        :fuelstoragelevel,
+        :fuel_contract,
+        :fuel_injection,
+        :fuel_withdrawal,
     ]
 
     # Defines dual variables to extract, such as:
     get_dual = Dict{Symbol,Function}(
         :prices => (sp) -> d.rundata.scale_objective * JuMP.dual.(sp[:defineShedding]),  # shadow prices of demand.
-        :mwv    => (sp) -> -d.rundata.scale_objective * JuMP.dual.(sp[:rbalance]) / 1E3 / d.rundata.scale_reservoirs # marginal water value, scaled appropriately.
+        :mwv    => (sp) -> -d.rundata.scale_objective * JuMP.dual.(sp[:rbalance]) / 1E3 / d.rundata.scale_reservoirs, # marginal water value, scaled appropriately.
+        :mfsv   => (sp) -> -d.rundata.scale_objective * JuMP.dual.(sp[:fuelStorageBalance]) / 1E3  # marginal fuel value
     )
 
     # Initial State Handling
@@ -174,7 +180,7 @@ function simulate(JADEmodel::JADEModel, parameters::JADESimulation)
                     t = τ - parameters.initial_stage + 1
                     temp = Dict{Symbol,Any}()
                     push!(results[i], temp)
-                    for sym in vcat(get_primal, [:stage_objective, :bellman_term, :prices, :mwv]) # Extracting and Rescaling Variables
+                    for sym in vcat(get_primal, [:stage_objective, :bellman_term, :prices, :mwv, :mfsv]) # Extracting and Rescaling Variables
                         if sym == :reslevel
                             results[i][t][sym] = Dict{Symbol,SDDP.State}()
                             for key in keys(sequence[1][(i-1)*wks+t][sym])
@@ -290,7 +296,7 @@ function simulate(JADEmodel::JADEModel, parameters::JADESimulation)
                 push!(results[i], temp)
                 for sym in
                     # Extract and rescale variables.
-                    vcat(get_primal, [:stage_objective, :bellman_term, :prices, :mwv])
+                    vcat(get_primal, [:stage_objective, :bellman_term, :prices, :mwv, :mfsv])
                     if sym == :reslevel
                         results[i][t][sym] = Dict{Symbol,SDDP.State}()
                         for key in keys(sequence[1][(i-1)*wks+t][sym])
@@ -336,7 +342,7 @@ function simulate(JADEmodel::JADEModel, parameters::JADESimulation)
     end
 
     @info("Saving output in " * joinpath("Output", d.rundata.data_dir, d.rundata.policy_dir, parameters.sim_dir))
-    write_sim_results(results, d, parameters)
+    # write_sim_results(results, d, parameters)
     output_tidy_results(
         results,
         d,
@@ -356,6 +362,12 @@ function simulate(JADEmodel::JADEModel, parameters::JADESimulation)
             :total_storage,
             :inflow_year,
             :mwv,
+
+            :fuelstoragelevel,
+            :fuel_contract,
+            :fuel_injection,
+            :fuel_withdrawal,
+            :mfsv
         ],
     )
 
