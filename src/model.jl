@@ -60,9 +60,9 @@ function JADEsddp(d::JADEData, optimizer = nothing)
         optimizer = optimizer,
     ) do md, stage                                    # The do block defines the model for each stage (this part continues below).
 
-        #-------------------------------------------------------------------------
-        # Year and week for the current stage
-        #-------------------------------------------------------------------------
+#########-------------------------------------------------------------------------
+######### Year and week for the current stage
+#########-------------------------------------------------------------------------
         timenow = TimePoint(d.rundata.start_yr, d.rundata.start_wk) + stage - 1  # Constructs a TimePoint object for the current stage by 
                                                                                  # adding (stage - 1) weeks to the starting year and week.
         CONTINGENT = [
@@ -81,10 +81,11 @@ function JADEsddp(d::JADEData, optimizer = nothing)
             (n, sector, lb) for n in keys(d.en_tranches[timenow]) for            # Builds a list of (node, sector, loadblock) tuples for energy tranches.
             (sector, lb) in keys(d.en_tranches[timenow][n])
         ])
+#########------------------------------------------------------------------------
 
-        #------------------------------------------------------------------------
-        # State variable: water in reservoirs
-        #------------------------------------------------------------------------
+#########------------------------------------------------------------------------
+######### State variable: water in reservoirs
+#########------------------------------------------------------------------------
         JuMP.@variable(
             md,
             -sum( d.reservoirs[r].contingent[timenow][j].level / scale_factor for       # Calculates the total contingent water in reservoir r at timenow.
@@ -94,17 +95,7 @@ function JADEsddp(d::JADEData, optimizer = nothing)
             SDDP.State,                                                                 # keyword SDDP.State provided by the SDDP.jl package. It tells the model that the variable being declared is a state variable in a multi-stage stochastic optimization problem.
             initial_value = d.reservoirs[r].initial / scale_factor                      # Sets the starting water level for each reservoir.
         )
-
-        # ------------------------------------------------------------------------
-        # State variable: fuel storage
-        # ------------------------------------------------------------------------
-        JuMP.@variable(
-            md,
-            0 <= fuelstoragelevel[stg in s.STORED_FUELS] <=                             # a state variable representing the fuel (TJ) in storage stg at the current stage.
-            d.fuel_storages[stg].capacity,                  
-            SDDP.State,                                                                 # keyword SDDP.State provided by the SDDP.jl package. It tells the model that the variable being declared is a state variable in a multi-stage stochastic optimization problem.
-            initial_value = d.fuel_storages[stg].initial                                # Sets the starting fuel level for each storage.
-        )
+#########------------------------------------------------------------------------
 
 #########------------------------------------------------------------------------
 ######### Other variables
@@ -119,10 +110,6 @@ function JADEsddp(d::JADEData, optimizer = nothing)
                 hydro_disp[s.HYDROS, s.BLOCKS] >= 0              # Dispatch of energy in MW from hydro stations
                 
                 thermal_use[s.THERMALS, s.BLOCKS] >= 0           # Amount of thermal energy used, in MW
-                
-                fuel_contract[s.STORED_FUELS] >= 0               # Amount of fuel delivered according to fuel contract, in TJ (ignore fuel contract for now)
-                fuel_injection[s.STORED_FUELS] >= 0              # Amount of fuel injected into storage, in TJ (ignore max injection constraints)
-                fuel_withdrawal[s.STORED_FUELS] >= 0             # Amount of fuel withdrawn from storage, in TJ (ignore max withdrawal constraints) 
 
                 transflow[s.TRANS_ARCS, s.BLOCKS]                # Transmission flows between nodes in MW
                 
@@ -185,6 +172,7 @@ function JADEsddp(d::JADEData, optimizer = nothing)
                 end
             )
         end
+#########------------------------------------------------------------------------
 
 #########------------------------------------------------------------------------
 ######### Define handy expressions
@@ -245,16 +233,7 @@ function JADEsddp(d::JADEData, optimizer = nothing)
                 )
             )
         end
-
-        # Fuel (TJ) used for thermal generation
-        JuMP.@expressions(
-            md,
-            begin
-                fuel_use_TJ[sf in s.STORED_FUELS],
-                sum(thermal_use[m,bl] * d.thermal_stations[m].heatrate * d.durations[timenow][bl] * 1e-3
-                for bl in s.BLOCKS, m in keys(d.thermal_to_storage) if d.thermal_to_storage[m]==sf)
-            end
-        ) 
+#########------------------------------------------------------------------------
 
 #########------------------------------------------------------------------------
 ######### Define constraints
@@ -305,18 +284,6 @@ function JADEsddp(d::JADEData, optimizer = nothing)
                 sum(lostload[n, bl, (s, name)] * d.durations[timenow][bl] for bl in loadblocks, (s, name) in keys(d.dr_tranches[timenow][n][bl]) if s == sector
                 ) <= sum(energyshedding[n, (sector, loadblocks), k] for k in 1:length(d.en_tranches[timenow][n][(sector, loadblocks)]))
 
-                # Fuel use/storage balance constraints
-                fuelUseBalance[sf in s.STORED_FUELS],
-                fuel_contract[sf] + fuel_withdrawal[sf] - fuel_injection[sf] >= fuel_use_TJ[sf]
-
-                # Fuel contracts
-                fuelContractDelivery[sf in s.STORED_FUELS],
-                fuel_contract[sf] == d.fuel_contracts[timenow][sf] 
-                
-                # Conservation for fuel storages
-                fuelStorageBalance[sf in s.STORED_FUELS],
-                fuelstoragelevel[sf].out - fuelstoragelevel[sf].in == fuel_injection[sf] - fuel_withdrawal[sf]
-
             end
         )
 
@@ -334,9 +301,11 @@ function JADEsddp(d::JADEData, optimizer = nothing)
                 end
             )
         end
+#########------------------------------------------------------------------------
 
-        ###################
-        #ABP losses code
+#########------------------------------------------------------------------------
+######### ABP losses code
+#########------------------------------------------------------------------------
         if d.rundata.losses != :none
             JuMP.@constraints(
                 md,
@@ -380,13 +349,63 @@ function JADEsddp(d::JADEData, optimizer = nothing)
                 end
             )
         end
+#########------------------------------------------------------------------------
 
-        #ABP losses code ends
-        #####################
+#########------------------------------------------------------------------------
+######### Fuel variables and constraints
+#########------------------------------------------------------------------------
+        # ------------------------------------------------------------------------
+        # State variable: fuel storage
+        # ------------------------------------------------------------------------
+        JuMP.@variable(
+            md,
+            0 <= fuelstoragelevel[stg in s.STORED_FUELS] <=                             # a state variable representing the fuel (TJ) in storage stg at the current stage.
+            d.fuel_storages[stg].capacity,                  
+            SDDP.State,                                                                 # keyword SDDP.State provided by the SDDP.jl package. It tells the model that the variable being declared is a state variable in a multi-stage stochastic optimization problem.
+            initial_value = d.fuel_storages[stg].initial                                # Sets the starting fuel level for each storage.
+        )
 
-        #------------------------------------------------------------------------
-        # Flow-conservation-related calculations
-        #------------------------------------------------------------------------
+        # 
+        JuMP.@variables(
+            md,
+            begin                
+                fuel_contract[s.STORED_FUELS] >= 0               # Amount of fuel delivered according to fuel contract, in TJ (ignore fuel contract for now)
+                fuel_injection[s.STORED_FUELS] >= 0              # Amount of fuel injected into storage, in TJ (ignore max injection constraints)
+                fuel_withdrawal[s.STORED_FUELS] >= 0             # Amount of fuel withdrawn from storage, in TJ (ignore max withdrawal constraints) 
+            end
+        )
+
+        # Fuel (TJ) used for thermal generation
+        JuMP.@expressions(
+            md,
+            begin
+                fuel_use_TJ[sf in s.STORED_FUELS],
+                sum(thermal_use[m,bl] * d.thermal_stations[m].heatrate * d.durations[timenow][bl] * 1e-3
+                for bl in s.BLOCKS, m in keys(d.thermal_to_storage) if d.thermal_to_storage[m]==sf)
+            end
+        ) 
+
+        JuMP.@constraints(
+            md,
+            begin
+                # Fuel use/storage balance constraints
+                fuelUseBalance[sf in s.STORED_FUELS],
+                fuel_contract[sf] + fuel_withdrawal[sf] - fuel_injection[sf] >= fuel_use_TJ[sf]
+
+                # Fuel contracts
+                fuelContractDelivery[sf in s.STORED_FUELS],
+                fuel_contract[sf] == d.fuel_contracts[timenow][sf] 
+                
+                # Conservation for fuel storages
+                fuelStorageBalance[sf in s.STORED_FUELS],
+                fuelstoragelevel[sf].out - fuelstoragelevel[sf].in == fuel_injection[sf] - fuel_withdrawal[sf]
+            end
+        )
+#########------------------------------------------------------------------------
+
+#########------------------------------------------------------------------------
+######### Flow-conservation-related calculations
+#########------------------------------------------------------------------------
         # Initialize Scenario List - Creates an empty array of dictionaries. 
         # Each dictionary will represent one inflow scenario, mapping catchments (and a scenario ID) to inflow values.
         inflow_uncertainty = Array{Dict{Symbol,Float64},1}()
@@ -469,6 +488,7 @@ function JADEsddp(d::JADEData, optimizer = nothing)
                 error("Invalid bound type: " * string(dr.boundtype))
             end
         end
+#########------------------------------------------------------------------------
 
 #########------------------------------------------------------------------------
 ######### Objective-related calculations
@@ -546,6 +566,8 @@ function JADEsddp(d::JADEData, optimizer = nothing)
             # Cost function includes terminal values added
             SDDP.@stageobjective(md, immediate_cost / scale_obj + terminalcost)
         end
+#########------------------------------------------------------------------------
+
     end
 
     return sddpm

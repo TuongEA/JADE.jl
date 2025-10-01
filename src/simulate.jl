@@ -67,6 +67,7 @@ function simulate(JADEmodel::JADEModel, parameters::JADESimulation)
         :carbon_emissions,
 
         :fuelstoragelevel,
+        :fuel_use_TJ,
         :fuel_contract,
         :fuel_injection,
         :fuel_withdrawal,
@@ -365,6 +366,7 @@ function simulate(JADEmodel::JADEModel, parameters::JADESimulation)
 
             :fuelstoragelevel,
             :fuel_contract,
+            :fuel_use_TJ,
             :fuel_injection,
             :fuel_withdrawal,
             :mfsv
