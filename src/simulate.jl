@@ -65,20 +65,20 @@ function simulate(JADEmodel::JADEModel, parameters::JADESimulation)
         :lostloadcosts,
         :contingent_storage_cost,
         :carbon_emissions,
-
-        :fuelstoragelevel,
-        :fuel_use_TJ,
-        :fuel_contract,
-        :fuel_injection,
-        :fuel_withdrawal,
     ]
+    if ApplyFuelConstraints
+        fuel_primal = [:fuelstoragelevel, :fuel_use_TJ, :fuel_contract, :fuel_injection, :fuel_withdrawal ]
+        get_primal = [get_primal; fuel_primal]
+    end
 
     # Defines dual variables to extract, such as:
     get_dual = Dict{Symbol,Function}(
         :prices => (sp) -> d.rundata.scale_objective * JuMP.dual.(sp[:defineShedding]),  # shadow prices of demand.
         :mwv    => (sp) -> -d.rundata.scale_objective * JuMP.dual.(sp[:rbalance]) / 1E3 / d.rundata.scale_reservoirs, # marginal water value, scaled appropriately.
-        :mfsv   => (sp) -> -d.rundata.scale_objective * JuMP.dual.(sp[:fuelStorageBalance]) / 1E3  # marginal fuel value
     )
+    if ApplyFuelConstraints
+        get_dual[:mfsv] = (sp) -> -d.rundata.scale_objective * JuMP.dual.(sp[:fuelStorageBalance]) / 1E3  # marginal fuel value
+    end
 
     # Initial State Handling
     initial_state = SDDP._initial_state(JADEmodel.sddpm) # Gets the default initial state from the model
@@ -124,6 +124,11 @@ function simulate(JADEmodel::JADEModel, parameters::JADESimulation)
         wks += 1 - parameters.initial_stage
     else
         lastwk += parameters.initial_stage - 1
+    end
+
+    primaldualvariables = vcat(get_primal, [:stage_objective, :bellman_term, :prices, :mwv])
+    if ApplyFuelConstraints
+        primaldualvariables = [primaldualvariables; :mfsv]
     end
 
     if parameters.sim_type == :monte_carlo # Monte Carlo Simulation
@@ -181,7 +186,8 @@ function simulate(JADEmodel::JADEModel, parameters::JADESimulation)
                     t = τ - parameters.initial_stage + 1
                     temp = Dict{Symbol,Any}()
                     push!(results[i], temp)
-                    for sym in vcat(get_primal, [:stage_objective, :bellman_term, :prices, :mwv, :mfsv]) # Extracting and Rescaling Variables
+
+                    for sym in primaldualvariables # Extracting and Rescaling Variables
                         if sym == :reslevel
                             results[i][t][sym] = Dict{Symbol,SDDP.State}()
                             for key in keys(sequence[1][(i-1)*wks+t][sym])
@@ -295,9 +301,7 @@ function simulate(JADEmodel::JADEModel, parameters::JADESimulation)
                 t = τ - parameters.initial_stage + 1
                 temp = Dict{Symbol,Any}()
                 push!(results[i], temp)
-                for sym in
-                    # Extract and rescale variables.
-                    vcat(get_primal, [:stage_objective, :bellman_term, :prices, :mwv, :mfsv])
+                for sym in primaldualvariables  # Extract and rescale variables.
                     if sym == :reslevel
                         results[i][t][sym] = Dict{Symbol,SDDP.State}()
                         for key in keys(sequence[1][(i-1)*wks+t][sym])
@@ -344,33 +348,17 @@ function simulate(JADEmodel::JADEModel, parameters::JADESimulation)
 
     @info("Saving output in " * joinpath("Output", d.rundata.data_dir, d.rundata.policy_dir, parameters.sim_dir))
     # write_sim_results(results, d, parameters)
+
+    tidy_variables = [:reslevel, :thermal_use, :transflow, :prices, :lostload, :flowover, :flowunder, :flowpenalties, 
+                      :contingent_storage_cost, :carbon_emissions, :spills, :total_storage, :inflow_year, :mwv]
+    if ApplyFuelConstraints
+        tidy_variables = [tidy_variables;[:fuelstoragelevel, :fuel_contract, :fuel_use_TJ,:fuel_injection, :fuel_withdrawal, :mfsv]]
+    end 
     output_tidy_results(
         results,
         d,
         parameters,
-        variables = [
-            :reslevel,
-            :thermal_use,
-            :transflow,
-            :prices,
-            :lostload,
-            :flowover,
-            :flowunder,
-            :flowpenalties,
-            :contingent_storage_cost,
-            :carbon_emissions,
-            :spills,
-            :total_storage,
-            :inflow_year,
-            :mwv,
-
-            :fuelstoragelevel,
-            :fuel_contract,
-            :fuel_use_TJ,
-            :fuel_injection,
-            :fuel_withdrawal,
-            :mfsv
-        ],
+        variables = tidy_variables,
     )
 
     @info("Done.")
