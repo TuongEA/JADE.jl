@@ -16,7 +16,7 @@ import Statistics
 using SDDP
 #using DelimitedFiles
 
-const ApplyFuelConstraints = false
+const ApplyFuelConstraints = true
 
 macro JADE_DIR()
     ex = quote

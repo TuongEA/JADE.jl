@@ -255,7 +255,8 @@ function write_training_results(sddpm::SDDP.PolicyGraph, d::JADEData, solveoptio
 
     if solveoptions.write_eohcuts
         if d.rundata.number_of_wks == 52 && d.rundata.steady_state == true
-            EOH_dir = joinpath(@__JADE_DIR__, "Output", d.rundata.data_dir, "EOH")
+            # EOH_dir = joinpath(@__JADE_DIR__, "Output", d.rundata.data_dir, "EOH")
+            EOH_dir = joinpath(@__JADE_DIR__, "Input","EOH")
             @info("Creating EOH cuts in " * EOH_dir )
 
             !ispath(EOH_dir) && mkpath(EOH_dir)
