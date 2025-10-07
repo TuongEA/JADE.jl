@@ -5,21 +5,21 @@
 #  If a copy of the MPL was not distributed with this file, You can obtain one at
 #  http://mozilla.org/MPL/2.0/.
 
-import Statistics: mean, max
-
+str2sym(s::AbstractString) = Symbol(uppercase(String(s)))
+#import Statistics: mean, max
 """
 	parsefile(f::Function, file::String, trim::Bool = false)
 
-This function reads in a data file and extracts each of the non-comment / non-empty rows,
-splits into into a vector using ',' as the delimiter, and then applies some custom processing `f`.
+    This function reads in a data file and extracts each of the non-comment / non-empty rows,
+    splits into into a vector using ',' as the delimiter, and then applies some custom processing `f`.
 
-### Required Arugments
-`f` custom function that processes a line of the data file.
+    ### Required Arugments
+    `f` custom function that processes a line of the data file.
 
-`file` path of the file.
+    `file` path of the file.
 
-### Keyword Arguments
-`trim` if `true` trailing commas will be discarded.
+    ### Keyword Arguments
+    `trim` if `true` trailing commas will be discarded.
 
 """
 function parsefile(f::Function, file::String, trim::Bool = false)
@@ -35,86 +35,89 @@ end
 """
 	getitems(io::IOStream, trim::Bool)
 
-This function takes an `IOStream` for a CSV file and reading the first line, decarding empty / comment rows, and
-otherwise splitting into into a vector using ',' as the delimiter. This vector is returned.
+    This function takes an `IOStream` for a CSV file and reading the first line, decarding empty / comment rows, and
+    otherwise splitting into into a vector using ',' as the delimiter. This vector is returned.
 
-### Required Arugments
-`io` `IOStream` object for a CSV file.
+    ### Required Arugments
+    `io` `IOStream` object for a CSV file.
 
-`trim` if `true` trailing commas will be discarded.
+    `trim` if `true` trailing commas will be discarded.
 
 """
 function getitems(io::IOStream, trim::Bool)
     line = strip(readline(io))
+
+    # Skip empty lines or full-line comments
     if (line == "" || first(line) == '%') # comment char
         return String[], true
     end
-    # drop trailling comments
+
+    # Drop trailling comments
     line = split(line, '%')[1]
 
+    # Split by commas and trim whitespace
     items = strip.(split(line, ","))
 
+    # Optionally remove trailing empty items
     if trim
         while length(items) > 0 && items[end] == ""
             deleteat!(items, length(items))
         end
     end
 
+    # Skip if all items are empty
     if length(items) == 0 || maximum(length.(items)) == 0
         return String[], true
     end
+
     return items, false
 end
 
 """
 	parse_run_options(file::String)
 
-This function loads a run file (CSV) creates a `Dict` that has keys corresponding to various
-`JADE` `RunData` fields, and their associated values.
+    This function loads a run file (CSV) creates a `Dict` that has keys corresponding to various
+    `JADE` `RunData` fields, and their associated values.
 
-### Required Arugments
-`file` is the path to the run file that is being loaded.
+    ### Required Arugments
+    `file` is the path to the run file that is being loaded.
 
 """
 function parse_run_options(file::String)
     run_options = Dict{String,String}()
     parsefile(file) do items
-        @assert length(items) == 2 # must be [key,value]
+        @assert length(items) == 2 "Each line must contain exactly two items: key and value."
         if haskey(run_options, items[1])
-            error("Run option $(items[1]) given twice!")
+            error("Duplicate run option key found: \"$(items[1])\"")
         end
         return run_options[items[1]] = items[2]
     end
     return run_options
 end
 
-str2sym(s::AbstractString) = Symbol(uppercase(String(s)))
-
-include("time.jl")
-
 """
     gettimeseries(file::String)
 
-Read timeseries with arbitrary number of columns from `file`.
+    Read timeseries with arbitrary number of columns from `file`.
 
-### Required Arguments
-`file` is the name of the file from which JADE is loading Timeseries data.
+    ### Required Arguments
+    `file` is the name of the file from which JADE is loading Timeseries data.
 
-# Example File
+    # Example File
 
-    % Data (A,B,C)
-    YEAR,WEEK,A,B,C
-    2005,1,4,18.68,4.49
-    2005,2,4,18.68,4.49
+        % Data (A,B,C)
+        YEAR,WEEK,A,B,C
+        2005,1,4,18.68,4.49
+        2005,2,4,18.68,4.49
 """
 function gettimeseries(file::String)
     data = Dict{Symbol,Float64}[]
     columns = Symbol[]
     start_time = nothing
     parsefile(file, true) do items
-        @assert length(items) >= 3
+        @assert length(items) >= 3 "Each row must have at least YEAR, WEEK, and one data column."
         if lowercase(items[1]) == "year"
-            # header row
+            # Header row: extract column names starting from the 3rd item
             for it in items[3:end]
                 if it != ""
                     push!(columns, str2sym(it))
@@ -139,18 +142,33 @@ function gettimeseries(file::String)
     return TimeSeries{Dict{Symbol,Float64}}(start_time, data), columns
 end
 
-#---------------------------------------------------------------------
-# Power system nodes
-#---------------------------------------------------------------------
-struct NodeHas
-    thermal::Array{Symbol}
-    hydro::Array{Symbol}
-end
+"""
+    Function Description: process_set_items
+    The process_set_items function takes a string input and a predefined set of items (either integers or symbols), 
+    and returns a filtered list of selected items based on the input instructions.
 
-function process_set_items(
-    input::Union{String,SubString},
-    setitems::Union{Vector{Symbol},Vector{Int}},
-)
+    Parameters:
+    input::Union{String,SubString}: A semicolon-separated string specifying which items to include or exclude. It can contain:
+
+    Individual items (e.g., "A;B" or "1;2")
+    Ranges (e.g., "A-C" or "1-3")
+    The keyword "ALL" to select the full range
+    Exclusions prefixed with ! (e.g., "!B" or "!2-3")
+    setitems::Union{Vector{Symbol},Vector{Int}}: The full list of available items to choose from.
+
+    Behavior:
+    Parses the input string and normalizes it.
+    Converts items to match the type of setitems (Symbol or Int).
+    Handles inclusion and exclusion logic:
+    Includes specified items or ranges.
+    Excludes specified items or ranges if they were previously included.
+    Ensures no duplicates in the final selection.
+    Throws errors for invalid input, unknown items, or empty selection.
+
+    Returns:
+    A vector of selected items (Vector{Symbol} or Vector{Int}), based on the input instructions.
+"""
+function process_set_items(input::Union{String,SubString}, setitems::Union{Vector{Symbol},Vector{Int}})
     function cnvt(value::Union{String,SubString})
         if typeof(setitems) == Vector{Int}
             return parse(Int, value)
@@ -162,12 +180,15 @@ function process_set_items(
     if input == ""
         error("No items specifed from set " * string(setitems))
     end
+
+    # Splits the input string by ; and converts each item to uppercase.
     items = split(input, ";")
     for i in 1:length(items)
         items[i] = uppercase(items[i])
     end
-    selected = nothing
 
+    # Initializes an empty vector to store selected items, matching the type of setitems.
+    selected = nothing
     if typeof(setitems) == Vector{Int}
         selected = Int[]
     else
@@ -175,12 +196,13 @@ function process_set_items(
     end
 
     for i in items
-        if uppercase(i) == "ALL"
+        if uppercase(i) == "ALL" # "ALL" is converted to a range from the first to the last item in setitems.
             i = string(setitems[1]) * "-" * string(setitems[end])
         end
-        if i[1] != '!'
+        if i[1] != '!' # If the item does not start with !, it's an inclusion.
             range = split(i, "-")
-            if length(range) == 1
+            if length(range) == 1 # Single item
+                # Converts and checks if the item is in setitems, then adds it to selected.
                 if cnvt(i) in setitems
                     if cnvt(i) ∉ selected
                         push!(selected, cnvt(i))
@@ -190,12 +212,14 @@ function process_set_items(
                 else
                     error("Unknown set item " * i * " from " * string(setitems))
                 end
-            elseif length(range) == 2
+            elseif length(range) == 2 # Range (e.g., "A-C" or "1-3")
+                # Finds indices of the start and end items in setitems.
                 index1 = findfirst(isequal(cnvt(range[1])), setitems)
                 index2 = findfirst(isequal(cnvt(range[2])), setitems)
                 if index1 == nothing || index2 == nothing || index2 < index1
                     error("Invalid range specified: " * i)
                 end
+                # Adds all items in that range to selected.
                 for j in index1:index2
                     if setitems[j] ∉ selected
                         push!(selected, setitems[j])
@@ -206,7 +230,7 @@ function process_set_items(
             else
                 error("Only two ends of a range can be specified: " * i)
             end
-        else
+        else # If the item starts with !, it's an exclusion.
             range = split(i[2:end], "-")
             if length(range) == 1
                 if cnvt(i[2:end]) ∈ selected
@@ -236,9 +260,12 @@ function process_set_items(
         end
     end
 
+    # Throws an error if no items were selected.
     if length(selected) == 0
         error("No items selected from set " * string(setitems))
     end
+
+    # Returns the final list of selected items.
     return selected
 end
 
@@ -249,19 +276,26 @@ include(joinpath("data", "outages.jl"))
 include(joinpath("data", "fixed.jl"))
 include(joinpath("data", "transmission.jl"))
 include(joinpath("data", "checks.jl"))
-include("network.jl")
+
+#---------------------------------------------------------------------
+# Power system nodes
+#---------------------------------------------------------------------
+struct NodeHas
+    thermal::Array{Symbol}
+    hydro::Array{Symbol}
+end
 
 """
     getnodes(NODES::Vector{Symbol},
              thermal_stations::Dict{Symbol,ThermalStation},
              hydro_stations::Dict{Symbol,HydroStation})
 
-Assigns thermal and hydro plants to their nodes.
+    Assigns thermal and hydro plants to their nodes.
 
-### Required Arguments
-`NODES` is a vector of Symbols representing the nodes in the network.
-`thermal_stations` is a vector of `ThermalStation` objects.
-`hydro_stations` is a vector of `HydroStation` objects.
+    ### Required Arguments
+    `NODES` is a vector of Symbols representing the nodes in the network.
+    `thermal_stations` is a vector of `ThermalStation` objects.
+    `hydro_stations` is a vector of `HydroStation` objects.
 """
 function getnodes(
     NODES::Vector{Symbol},
@@ -289,53 +323,56 @@ end
 # Data type definitions and functions
 #--------------------------------------------
 """
-An object containing all the data required to run the JADE model.
+    An object containing all the data required to run the JADE model.
 
-### Fields
+    ### Fields
 
-`rundata` Run-related constants.
+    `rundata` Run-related constants.
 
-`thermal_stations` Dictionary of thermal power station properties.
+    `thermal_stations` Dictionary of thermal power station properties.
 
-`hydro_stations` Dictionary of hydro station properties.
+    `hydro_stations` Dictionary of hydro station properties.
 
-`reservoirs` Dictionary of reservoir properties.
+    `reservoirs` Dictionary of reservoir properties.
 
-`fuel_costs` Time series of weekly fuel costs.
+    `fuel_costs` Time series of weekly fuel costs.
 
-`carbon_content` Carbon content for each fuel type.
+    `carbon_content` Carbon content for each fuel type.
 
-`inflow_mat` Structure for storing inflow scenarios.
+    `inflow_mat` Structure for storing inflow scenarios.
 
-`station_arcs` Properties of arcs that correspond to hydro releases or spills.
+    `station_arcs` Properties of arcs that correspond to hydro releases or spills.
 
-`natural_arcs` Arcs not going through hydro stations.
+    `natural_arcs` Arcs not going through hydro stations.
 
-`nodehas` Dictionary of node properties.
+    `nodehas` Dictionary of node properties.
 
-`spMax` The maximum specific power value.
+    `spMax` The maximum specific power value.
 
-`transmission` Dictionary of transmission line properties.
+    `transmission` Dictionary of transmission line properties.
 
-`loops` Array of independent cycles in the transmission network, each entry being an array of arcs.
+    `loops` Array of independent cycles in the transmission network, each entry being an array of arcs.
 
-`durations` Timeseries with block durations.
+    `durations` Timeseries with block durations.
 
-`demand` Demand data.
+    `demand` Demand data.
 
-`outage` Outage each week for each station.
+    `outage` Outage each week for each station.
 
-`dr_tranches` Tranches for power-based demand response and load shedding.
+    `dr_tranches` Tranches for power-based demand response and load shedding.
 
-`en_tranches` Tranches for energy-based demand response.
+    `en_tranches` Tranches for energy-based demand response.
 
-`terminal_eqns` Equations for terminal water value.
+    `terminal_eqns` Equations for terminal water value.
 
-`sets` Structure containing all sets for the JADE model.
+    `sets` Structure containing all sets for the JADE model.
 """
 mutable struct JADEData
-    rundata::RunData
+    rundata::RunData                                   
     thermal_stations::Dict{Symbol,ThermalStation}
+    fuel_storages::Dict{Symbol,FuelStorage}
+    thermal_to_storage::Dict{Symbol,Symbol}
+    fuel_contracts::TimeSeries{Dict{Symbol,Float64}}
     hydro_stations::Dict{Symbol,HydroStation}
     reservoirs::Dict{Symbol,Reservoir}
     fuel_costs::TimeSeries{Dict{Symbol,Float64}}
@@ -383,9 +420,19 @@ function JADEdata(rundata::RunData)
     demand, sets.NODES = getdemand(filedir("demand.csv"), durations)
     checkdemands(durations, demand, rundata)
 
+    @info("Input fuel storages")
+    fuel_storages = getfuelstorage(filedir("fuel_storages.csv"))
+    sets.STORED_FUELS = collect(keys(fuel_storages))
+
+    @info("Input fuel contracts")
+    fuel_contracts = getfuelcontracts(filedir("fuel_contracts.csv"))
+
     @info("Input thermal stations")
     thermal_stations = getthermalstations(filedir("thermal_stations.csv"), sets.NODES)
     sets.THERMALS = collect(keys(thermal_stations))
+
+    @info("Input station - fuel storages mapping")
+    thermal_to_storage = get_station_fuelstorage_mapping(filedir("thermal_stations_fuel_storage.csv"), sets.STORED_FUELS)
 
     @info("Input hydro stations")
     hydro_stations, station_arcs = gethydros(filedir("hydro_stations.csv"), sets.NODES)
@@ -444,6 +491,7 @@ function JADEdata(rundata::RunData)
 
     # Set the specific power value for each reservoir
     set_reservoir_sp!(reservoirs, hydro_stations, sets, station_arcs)
+    # Calculate max specific power factor of all reservoirs. This value is used to calculate the penalty for going over/under flow bounds.
     spMax = maximum([reservoirs[r].sp for r in sets.RESERVOIRS])
 
     # Dictionary of capacities and losses for transmission arcs
@@ -574,7 +622,9 @@ function JADEdata(rundata::RunData)
 
     @info("Input thermal fuel properties")
 
-    fuel_costs, carbon_content = getfuelcosts(filedir("thermal_fuel_costs.csv"))
+    # fuel_costs, carbon_content = getfuelcosts(filedir("thermal_fuel_costs.csv"))
+    fuel_costs = getfuelandcarboncosts(filedir("fuel_and_CO2_costs.csv"))
+    carbon_content = getfuelcarbonccontents(filedir("fuel_CO2_contents.csv"))
     checkfuelcosts(fuel_costs, rundata)
 
     @info(
@@ -586,6 +636,9 @@ function JADEdata(rundata::RunData)
     return JADEData(
         rundata,
         thermal_stations,
+        fuel_storages,
+        thermal_to_storage,
+        fuel_contracts,
         hydro_stations,
         reservoirs,
         fuel_costs,
@@ -612,31 +665,41 @@ function backup_input_files(rundata::RunData)
     input_filenames = [
         "hours_per_block.csv",
         "demand.csv",
+        
         "thermal_stations.csv",
+        
         "hydro_stations.csv",
         "reservoirs.csv",
         "reservoir_limits.csv",
         "hydro_arcs.csv",
         "inflows.csv",
+        "terminal_water_value.csv",
+
         "line_outages.csv",
         "transmission_outages.csv",
         "transmission.csv",
+
         "generator_outages.csv",
         "station_outages.csv",
         "fixed_generation.csv",
-        "terminal_water_value.csv",
         "fixed_stations.csv",
-        "demand_response.csv",
+                
         "lost_load.csv",
         "demand_response.csv",
-        "lost_load.csv",
+        
+
         "thermal_fuel_costs.csv",
-        "thermal_fuel_storage.csv",
-        "thermal_fuel_supply.csv",
+        "fuel_and_CO2_costs.csv",
+        "fuel_CO2_contents.csv",
+
+        "thermal_stations_fuel_storage.csv",
+        "fuel_storages.csv",
+        "fuel_contracts.csv",
+
     ]
 
     out_path =
-        joinpath(@JADE_DIR, "Output", rundata.data_dir, rundata.policy_dir, "data_files")
+        joinpath(@__JADE_DIR__, "Output", rundata.data_dir, rundata.policy_dir, "data_files")
 
     if !isdir(out_path)
         mkdir(out_path)
@@ -649,4 +712,34 @@ function backup_input_files(rundata::RunData)
             cp(path_to_file, joinpath(out_path, file), force = true)
         end
     end
+end
+
+function _strip_trailing_comment(x::AbstractString)
+    index = findfirst('%', x)
+    if index === nothing
+        return x
+    end
+    field = strip(x[1:index-1])
+    if field == "na" || field == "NA" || field == "default"
+        return missing
+    end
+    return field
+end
+
+_strip_trailing_comment(::Missing) = missing
+
+function _validate_and_strip_trailing_comment(row, required, optional = Symbol[])
+    row_names = CSV.getnames(row)
+    @assert length(required) <= length(row_names) <= length(required) + length(optional)
+    for n in required
+        @assert n in row_names
+    end
+    for n in row_names
+        @assert n in required || n in optional
+    end
+    dict = Dict(
+        name => _strip_trailing_comment(getproperty(row, name)) for
+        name in CSV.getnames(row)
+    )
+    return (; dict...)
 end

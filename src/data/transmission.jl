@@ -24,16 +24,13 @@ struct TransArc
     # reactance::Float64
 end
 
-function gettransarcs(
-    file::String,
-    lineoutage::TimeSeries{Dict{Tuple{Symbol,Symbol},Float64}},
-    losses::Symbol,
-    loadblocks::Vector{Symbol},
-)
-    transmission = Dict{NTuple{2,Symbol},TransArc}()
+# Tuong's comment: this function can be simplify to care for the format that EA use only.
+function gettransarcs(file::String, lineoutage::TimeSeries{Dict{Tuple{Symbol,Symbol},Float64}}, losses::Symbol, loadblocks::Vector{Symbol})
+
+    transmission = Dict{NTuple{2,Symbol},TransArc}()  # Initializes an empty dictionary to store transmission arcs.
     presistance = 0.0
     nresistance = 0.0
-    vSPDlossArray = [
+    vSPDlossArray = [                                 # A piecewise loss function used if losses == :piecewise.
         0.14495 0.1087125
         0.32247 0.46742
         0.5 0.82247
@@ -42,8 +39,8 @@ function gettransarcs(
         1.0 1.8912875
     ]
 
-    poutage = TimeSeries{Float64}
-    noutage = TimeSeries{Float64}
+    poutage = TimeSeries{Float64}                     # Placeholders for positive direction outage time series.
+    noutage = TimeSeries{Float64}                     # Placeholders for negative direction outage time series.
 
     first = true
     parsefile(file, true) do items
@@ -166,7 +163,7 @@ function gettransarcs(
                     )
                 end
             end
-        elseif losses == :resistive
+        elseif losses == :resistive  # Not used by EA model data
             #  RESISTANCE MODEL
             # losses are 0.01*resistance*flow^2
             line_name = items[1] * "_TO_" * items[2]

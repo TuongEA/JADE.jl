@@ -8,20 +8,16 @@
 """
     write_sim_results(results, data::JADEData, parameters::JADESimulation)
 
-This function writes results from a simulation.
+    This function writes results from a simulation.
 
-### Required arguments
-`results` is a dictionary of results.
+    ### Required arguments
+    `results` is a dictionary of results.
 
-`data` is a JADE data object for the problem simulated.
+    `data` is a JADE data object for the problem simulated.
 
-`parameters` contains all the simulation settings.
+    `parameters` contains all the simulation settings.
 """
-function write_sim_results(
-    results::Array{Array{Dict{Symbol,Any},1},1},
-    d::JADEData,
-    parameters::JADESimulation,
-)
+function write_sim_results(results::Array{Array{Dict{Symbol,Any},1},1}, d::JADEData, parameters::JADESimulation)
 
     # Just aliases
     nsims = parameters.replications
@@ -34,20 +30,10 @@ function write_sim_results(
     T = d.durations
     s = d.sets
 
-    data_dir = joinpath(
-        @JADE_DIR,
-        "Output",
-        d.rundata.data_dir,
-        d.rundata.policy_dir,
-        parameters.sim_dir,
-    )
-
-    outdir(x) = joinpath(data_dir, x)
+    data_dir = joinpath(@__JADE_DIR__,"Output",d.rundata.data_dir,d.rundata.policy_dir,parameters.sim_dir)
 
     # Prepare output directory
-    if !ispath(data_dir)
-        mkpath(data_dir)
-    end
+    !ispath(data_dir) && mkpath(data_dir)
 
     # How we will store information from a variable (except inflows)
     function adddata(getvalue::Function, header::String, filename::String)
@@ -80,46 +66,37 @@ function write_sim_results(
                     for bl in s.BLOCKS
                         value = getvalue(i, j, bl)
                         write(f, ",", string(value))
-                    end # blocks
-                end   # weeks
-            end     # simulations
-        end       # do
-    end         # function
+                    end
+                end
+            end
+        end
+    end
 
-    # Access variable data
-    #outcomes(i::Int, j::Int, var::Symbol) = results[i][j][var]
 
     #------------------------------------
     # Final objective
     #------------------------------------
-    writedlm(
-        outdir("TotalCost.csv"),
-        [results[i][end][:running_cost] for i in 1:nsims],
-        ',',
-    )
+    open(joinpath(data_dir,"TotalCost.csv"), "w") do io
+        for i in 1:nsims
+            println(io, results[i][end][:running_cost])
+        end
+        return
+    end
 
     #------------------------------------
     # Stored energy
     #------------------------------------
-    adddata("energy_GWh", outdir("StoredEnergy.csv")) do i, j
-        return sum(
-            d.reservoirs[r].sp * results[i][j][:reslevel][r].out * 10^3 for
-            r in s.RESERVOIRS
-        )
+    adddata("energy_GWh", joinpath(data_dir,"StoredEnergy.csv")) do i, j
+        return sum(d.reservoirs[r].sp * results[i][j][:reslevel][r].out * 10^3 for r in s.RESERVOIRS) # Define function for getvalue(i,j)
     end
 
     #------------------------------------
     # Arc flows
     #------------------------------------
-    if !ispath(outdir("NaturalFlows"))
-        mkpath(outdir("NaturalFlows"))
-    end
+    !ispath(joinpath(data_dir,"NaturalFlows")) && mkpath(joinpath(data_dir,"NaturalFlows"))
 
-    for a in s.NATURAL_ARCS
-        # Write results
-        adddata(
-            outdir(string("NaturalFlows/", string(a[1]), "_", string(a[2]), ".csv")),
-        ) do i, j, bl
+    for a in s.NATURAL_ARCS # Write results for each water arc
+        adddata(joinpath(data_dir,string("NaturalFlows/", string(a[1]), "_", string(a[2]), ".csv"))) do i, j, bl
             return results[i][j][:naturalflows][a, bl]
         end
     end
@@ -127,15 +104,10 @@ function write_sim_results(
     #------------------------------------
     # Spill flows
     #------------------------------------
-    if !ispath(outdir("SpillFlows"))
-        mkpath(outdir("SpillFlows"))
-    end
+    !ispath(joinpath(data_dir,"SpillFlows")) && mkpath(joinpath(data_dir,"SpillFlows"))
 
-    for a in s.STATION_ARCS
-        # Write results
-        adddata(
-            outdir(string("SpillFlows/", string(a[1]), "_", string(a[2]), ".csv")),
-        ) do i, j, bl
+    for a in s.STATION_ARCS # Write results for each station's hydro arc
+        adddata(joinpath(data_dir,string("SpillFlows/", string(a[1]), "_", string(a[2]), ".csv"))) do i, j, bl
             return results[i][j][:spills][a, bl]
         end
     end
@@ -143,15 +115,10 @@ function write_sim_results(
     #------------------------------------
     # Release flows
     #------------------------------------
-    if !ispath(outdir("ReleaseFlows"))
-        mkpath(outdir("ReleaseFlows"))
-    end
+    !ispath(joinpath(data_dir,"ReleaseFlows")) && mkpath(joinpath(data_dir,"ReleaseFlows"))
 
-    for a in s.STATION_ARCS
-        # Write results
-        adddata(
-            outdir(string("ReleaseFlows/", string(a[1]), "_", string(a[2]), ".csv")),
-        ) do i, j, bl
+    for a in s.STATION_ARCS # Write results for each station's hydro arc
+        adddata(joinpath(data_dir,string("ReleaseFlows/", string(a[1]), "_", string(a[2]), ".csv"))) do i, j, bl
             return results[i][j][:releases][a, bl]
         end
     end
@@ -161,16 +128,14 @@ function write_sim_results(
     #------------------------------------
     # Calculate amount of flow below bound, in cumecs * hours, scenario i, stage j
     function flowunder(i, j)
-        timenow =
-            TimePoint(d.rundata.start_yr, d.rundata.start_wk) +
-            (j - 1) % d.rundata.number_of_wks
+        timenow = TimePoint(d.rundata.start_yr, d.rundata.start_wk) + (j - 1) % d.rundata.number_of_wks
         return sum([
             results[i][j][:flowunder][a, bl] * T[timenow][bl] for
             a in s.NATURAL_ARCS, bl in s.BLOCKS if d.natural_arcs[a].minflow != 0.0
-        ],)
+        ])
     end
 
-    adddata("lb_penalty", outdir("FlowLBCost.csv")) do i, j
+    adddata("lb_penalty", joinpath(data_dir,"FlowLBCost.csv")) do i, j
         return flowunder(i, j) * SECONDSPERHOUR * d.spMax * d.rundata.penalty_lb
     end
 
@@ -179,65 +144,50 @@ function write_sim_results(
     #------------------------------------
     # Calculate amount of flow above bound, in cumecs * hours, scenario i, stage j
     function flowover(i, j)
-        timenow =
-            TimePoint(d.rundata.start_yr, d.rundata.start_wk) +
-            (j - 1) % d.rundata.number_of_wks
+        timenow = TimePoint(d.rundata.start_yr, d.rundata.start_wk) + (j - 1) % d.rundata.number_of_wks
         return sum([
             results[i][j][:flowover][a, bl] * T[timenow][bl] for
             a in s.NATURAL_ARCS, bl in s.BLOCKS if d.natural_arcs[a].maxflow != Inf
-        ],)
+        ])
     end
 
-    adddata("ub_penalty", outdir("FlowUBCost.csv")) do i, j
+    adddata("ub_penalty", joinpath(data_dir,"FlowUBCost.csv")) do i, j
         return flowover(i, j) * SECONDSPERHOUR * d.spMax * d.rundata.penalty_ub
     end
 
     #------------------------------------
     # Output for thermal costs
     #------------------------------------
-    adddata("thermal_cost", outdir("ThermalCosts.csv")) do i, j
-        timenow =
-            TimePoint(d.rundata.start_yr, d.rundata.start_wk) +
-            (j - 1) % d.rundata.number_of_wks
-        cost = 0.0
-        for (name, station) in d.thermal_stations
-            for bl in s.BLOCKS
-                cost +=
-                    results[i][j][:thermal_use][name, bl] *
-                    d.fuel_costs[timenow][station.fuel] *
-                    station.heatrate *
-                    T[timenow][bl]
-            end
-        end
-        return cost
-        # ∑(Matrix × vector)ᵢ
-        # sum(
-        # [results[i][:thermal_use][j][t,bl] * d.fuel_costs[j][t] * d.thermal_stations[t].heatrate for t in s.THERMALS, bl in s.BLOCKS] *
-        # [T[j][bl] for bl in s.BLOCKS])
+    adddata("thermal_cost", joinpath(data_dir,"ThermalCosts.csv")) do i, j
+        timenow = TimePoint(d.rundata.start_yr, d.rundata.start_wk) + (j - 1) % d.rundata.number_of_wks
+        return sum([
+            results[i][j][:thermal_use][name, bl] * station.heatrate * d.fuel_costs[timenow][station.fuel] * T[timenow][bl] for
+            (name, station) in d.thermal_stations, bl in s.BLOCKS
+        ])
     end
 
     #------------------------------------
     # Lost Load
     #------------------------------------
-    adddata("cost", outdir("LostLoadCost.csv")) do i, j
+    adddata("cost", joinpath(data_dir,"LostLoadCost.csv")) do i, j
         return results[i][j][:lostloadcosts]
     end
 
     #------------------------------------
     # Total present cost
     #------------------------------------
-    adddata("cost", outdir("PresentCost.csv")) do i, j
+    adddata("cost", joinpath(data_dir,"PresentCost.csv")) do i, j
         return results[i][j][:stage_objective]
     end
 
     #------------------------------------
     # Future costs
     #------------------------------------
-    adddata("cost", outdir("FutureCost.csv")) do i, j
+    adddata("cost", joinpath(data_dir,"FutureCost.csv")) do i, j
         return results[i][j][:bellman_term]
     end
 
-    adddata("cost", outdir("SummedCosts.csv")) do i, j
+    adddata("cost", joinpath(data_dir,"SummedCosts.csv")) do i, j
         return results[i][j][:stage_objective] + results[i][j][:bellman_term]
     end
 
@@ -246,18 +196,12 @@ function write_sim_results(
     #------------------------------------
     spillarc(station) = d.hydro_stations[station].arc
     function spillsum(i, j, bl)
-        timenow =
-            TimePoint(d.rundata.start_yr, d.rundata.start_wk) +
-            (j - 1) % d.rundata.number_of_wks
-        return sum(
-            results[i][j][:spills][spillarc(m), bl] *
-            d.hydro_stations[m].sp *
-            T[timenow][bl] for m in s.HYDROS
-        )
+        timenow = TimePoint(d.rundata.start_yr, d.rundata.start_wk) + (j - 1) % d.rundata.number_of_wks
+        return sum(results[i][j][:spills][spillarc(m), bl] * d.hydro_stations[m].sp * T[timenow][bl] for m in s.HYDROS)
     end
 
     for bl in s.BLOCKS
-        adddata("energy_MWh", outdir("SpilledEnergy_$(bl).csv")) do i, j
+        adddata("energy_MWh", joinpath(data_dir,"SpilledEnergy_$(bl).csv")) do i, j
             return spillsum(i, j, bl)
         end
     end
@@ -265,14 +209,14 @@ function write_sim_results(
     #------------------------------------
     # Contingent storage cost
     #------------------------------------
-    adddata("contingent_storage_cost_\$", outdir("ContingentStorageCost.csv")) do i, j
+    adddata("contingent_storage_cost_\$", joinpath(data_dir,"ContingentStorageCost.csv")) do i, j
         return results[i][j][:contingent_storage_cost]
     end
 
     #------------------------------------
     # Archive run file
     #------------------------------------
-    open(joinpath(outdir("sim_parameters.json")), "w") do f
+    open(joinpath(joinpath(data_dir,"sim_parameters.json")), "w") do f
         return JSON.print(f, parameters)
     end
 
@@ -282,20 +226,15 @@ end
 """
 This function saves output from policy generation.
 """
-function write_training_results(
-    sddpm::SDDP.PolicyGraph,
-    d::JADEData,
-    solveoptions::JADESolveOptions,
-)
-    data_dir = joinpath(@JADE_DIR, "Output", d.rundata.data_dir)
+function write_training_results(sddpm::SDDP.PolicyGraph, d::JADEData, solveoptions::JADESolveOptions)
+    data_dir = joinpath(@__JADE_DIR__, "Output", d.rundata.data_dir)
 
     !ispath(data_dir) && mkpath(data_dir)
 
     #------------------------------------
     # Archive run and solve related data
     #------------------------------------
-    !ispath(joinpath(data_dir, d.rundata.policy_dir)) &&
-        mkpath(joinpath(data_dir, d.rundata.policy_dir))
+    !ispath(joinpath(data_dir, d.rundata.policy_dir)) && mkpath(joinpath(data_dir, d.rundata.policy_dir))
 
     @info("Archiving training parameters...")
     open(joinpath(data_dir, d.rundata.policy_dir, "rundata.json"), "w") do f
@@ -316,46 +255,18 @@ function write_training_results(
 
     if solveoptions.write_eohcuts
         if d.rundata.number_of_wks == 52 && d.rundata.steady_state == true
-            @info("Creating EOH cuts in " * joinpath("Input", "d.rundata.data_dir", "EOH"))
+            # EOH_dir = joinpath(@__JADE_DIR__, "Output", d.rundata.data_dir, "EOH")
+            EOH_dir = joinpath(@__JADE_DIR__, "Input","EOH")
+            @info("Creating EOH cuts in " * EOH_dir )
 
-            if !ispath(joinpath(@JADE_DIR, "Input", d.rundata.data_dir, "EOH"))
-                mkpath(joinpath(@JADE_DIR, "Input", d.rundata.data_dir, "EOH"))
-            end
+            !ispath(EOH_dir) && mkpath(EOH_dir)
 
-            JADE.write_cuts_to_file(
-                sddpm,
-                joinpath(
-                    @JADE_DIR,
-                    "Input",
-                    d.rundata.data_dir,
-                    "EOH",
-                    "$(d.rundata.policy_dir).eoh",
-                ),
-                d.rundata.start_wk,
-            )
+            JADE.write_cuts_to_file(sddpm, joinpath(EOH_dir, "$(d.rundata.policy_dir).eoh"), d.rundata.start_wk)
 
-            open(
-                joinpath(
-                    @JADE_DIR,
-                    "Input",
-                    d.rundata.data_dir,
-                    "EOH",
-                    "$(d.rundata.policy_dir).rdt",
-                ),
-                "w",
-            ) do f
+            open(joinpath(EOH_dir, "$(d.rundata.policy_dir).rdt"), "w") do f
                 return JSON.print(f, d.rundata)
             end
-            open(
-                joinpath(
-                    @JADE_DIR,
-                    "Input",
-                    d.rundata.data_dir,
-                    "EOH",
-                    "$(d.rundata.policy_dir).slv",
-                ),
-                "w",
-            ) do f
+            open(joinpath(EOH_dir, "$(d.rundata.policy_dir).slv"), "w") do f
                 return JSON.print(f, solveoptions)
             end
         else
@@ -371,48 +282,25 @@ function write_training_results(
     return nothing
 end
 
-function output_tidy_results(
-    results::Vector{Vector{Dict{Symbol,Any}}},
-    d::JADEData,
-    parameters::JADESimulation;
-    variables::Array{Symbol,1},
-)
-    data_dir = joinpath(
-        @JADE_DIR,
-        "Output",
-        d.rundata.data_dir,
-        d.rundata.policy_dir,
-        parameters.sim_dir,
-    )
-
-    outdir(x) = joinpath(data_dir, x)
+function output_tidy_results(results::Vector{Vector{Dict{Symbol,Any}}}, d::JADEData, parameters::JADESimulation; variables::Array{Symbol,1})
+    data_dir = joinpath(@__JADE_DIR__, "Output", d.rundata.data_dir, d.rundata.policy_dir, parameters.sim_dir)
 
     # Prepare output directory
-    if !ispath(data_dir)
-        mkpath(data_dir)
-    end
+    !ispath(data_dir) && mkpath(data_dir)
 
-    open(outdir("tidy_results.csv"), "w") do f
+    open(joinpath(data_dir,"tidy_results.csv"), "w") do f
         println(f, "simulation,stage,year,week,type,name,demand,node,value")
         for i in 1:length(results)
-            time = TimePoint(d.rundata.start_yr, d.rundata.start_wk)
-            time += parameters.initial_stage - 1
+            time = TimePoint(d.rundata.start_yr, d.rundata.start_wk) + (parameters.initial_stage - 1)
             for j in 1:length(results[i])
                 for s in variables
                     if s ∉ keys(results[i][j])
                         error(string(s) * " not found")
                     end
                     data = results[i][j][s]
-                    temp =
-                        string(i) *
-                        "," *
-                        string((j + parameters.initial_stage - 2) % WEEKSPERYEAR + 1) *
-                        "," *
-                        string(time.year) *
-                        "," *
-                        string(time.week) *
-                        "," *
-                        string(s)
+     
+                    temp = "$i,$((j + parameters.initial_stage - 2) % WEEKSPERYEAR + 1),$(time.year),$(time.week),$s"
+
                     temp2 = ""
                     if typeof(data) <: AbstractArray || typeof(data) <: Dict
                         if typeof(data) <: JuMP.Containers.SparseAxisArray
@@ -421,165 +309,54 @@ function output_tidy_results(
                         for k in keys(data)
                             if typeof(k) <: JuMP.Containers.DenseAxisArrayKey
                                 if length(getfield(k, 1)) == 1
-                                    temp2 =
-                                        replace(string(getfield(k, 1)[1]), "," => ";") *
-                                        ",-,-"
+                                    temp2 = replace(string(getfield(k, 1)[1]), "," => ";") * ",-,-"
+
                                 elseif length(getfield(k, 1)) == 2
                                     if s == :prices
-                                        temp2 =
-                                            "-," *
-                                            replace(string(getfield(k, 1)[2]), "," => ";") *
-                                            "," *
-                                            string(getfield(k, 1)[1])
+                                        temp2 =  "-," * replace(string(getfield(k, 1)[2]), "," => ";") * "," * string(getfield(k, 1)[1])
                                     else
-                                        temp2 =
-                                            replace(string(getfield(k, 1)[1]), "," => ";") *
-                                            "," *
-                                            string(getfield(k, 1)[2]) *
-                                            ",-"
+                                        temp2 = replace(string(getfield(k, 1)[1]), "," => ";") * "," * string(getfield(k, 1)[2]) * ",-"
                                     end
+                                
                                 elseif length(getfield(k, 1)) == 3
-                                    temp2 =
-                                        replace(string(getfield(k, 1)[3]), "," => ";") *
-                                        "," *
-                                        string(getfield(k, 1)[2]) *
-                                        "," *
-                                        string(getfield(k, 1)[1])
+                                    temp2 = replace(string(getfield(k, 1)[3]), "," => ";") * "," * string(getfield(k, 1)[2]) * "," * string(getfield(k, 1)[1])
                                 end
+
                                 if typeof(data[k]) <: SDDP.State
                                     if j == 1
                                         time2 = time - 1
-                                        println(
-                                            f,
-                                            string(i) *
-                                            "," *
-                                            string(
-                                                (j + parameters.initial_stage - 2) %
-                                                WEEKSPERYEAR,
-                                            ) *
-                                            "," *
-                                            string(time2.year) *
-                                            "," *
-                                            string(time2.week) *
-                                            "," *
-                                            string(s) *
-                                            "," *
-                                            temp2 *
-                                            "," *
-                                            string(data[k].in),
-                                        )
+                                        println(f, join([i, (j + parameters.initial_stage - 2) % WEEKSPERYEAR, time2.year, time2.week, s, temp2, data[k].in], ","))
                                     end
-                                    println(
-                                        f,
-                                        temp * "," * temp2 * "," * string(data[k].out),
-                                    )
+
+                                    println(f,join([temp, temp2 ,string(data[k].out)], ","))
                                 else
                                     println(f, temp * "," * temp2 * "," * string(data[k]))
                                 end
+
                             elseif typeof(data[k]) <: SDDP.State
                                 if j == 1
                                     time2 = time - 1
-                                    println(
-                                        f,
-                                        string(i) *
-                                        "," *
-                                        string(
-                                            (j + parameters.initial_stage - 2) %
-                                            WEEKSPERYEAR,
-                                        ) *
-                                        "," *
-                                        string(time2.year) *
-                                        "," *
-                                        string(time2.week) *
-                                        "," *
-                                        string(s) *
-                                        "," *
-                                        string(k) *
-                                        ",-,-," *
-                                        string(data[k].in),
-                                    )
+                                    println(f, join([i, (j + parameters.initial_stage - 2) % WEEKSPERYEAR, time2.year, time2.week, s, k, "-,-",data[k].in], ","))
                                 end
-                                println(
-                                    f,
-                                    temp * "," * string(k) * ",-,-," * string(data[k].out),
-                                )
+                                println(f, join([temp,k,"-,-",data[k].out], "," ))
+
                             elseif typeof(k) <: Tuple
                                 if length(k) == 1
-                                    println(
-                                        f,
-                                        string(i) *
-                                        "," *
-                                        string(
-                                            (j + parameters.initial_stage - 2) %
-                                            WEEKSPERYEAR + 1,
-                                        ) *
-                                        "," *
-                                        string(time.year) *
-                                        "," *
-                                        string(time.week) *
-                                        "," *
-                                        string(s) *
-                                        "," *
-                                        string(k[1]) *
-                                        ",-,-," *
-                                        string(data[k]),
-                                    )
+                                    println(f, join([i, (j + parameters.initial_stage - 2) % WEEKSPERYEAR + 1, time.year, time.week, s, k[1], "-,-", data[k]], ","))
+
                                 elseif length(k) == 2
-                                    println(
-                                        f,
-                                        string(i) *
-                                        "," *
-                                        string(
-                                            (j + parameters.initial_stage - 2) %
-                                            WEEKSPERYEAR + 1,
-                                        ) *
-                                        "," *
-                                        string(time.year) *
-                                        "," *
-                                        string(time.week) *
-                                        "," *
-                                        string(s) *
-                                        "," *
-                                        string(k[1]) *
-                                        "," *
-                                        string(k[2]) *
-                                        ",-," *
-                                        string(data[k]),
-                                    )
+                                    println(f, join([i, (j + parameters.initial_stage - 2) % WEEKSPERYEAR + 1, time.year, time.week, s, k[1], k[2], "-",data[k]], ","))
+
                                 elseif length(k) == 3
-                                    println(
-                                        f,
-                                        string(i) *
-                                        "," *
-                                        string(
-                                            (j + parameters.initial_stage - 2) %
-                                            WEEKSPERYEAR + 1,
-                                        ) *
-                                        "," *
-                                        string(time.year) *
-                                        "," *
-                                        string(time.week) *
-                                        "," *
-                                        string(s) *
-                                        "," *
-                                        replace(string(k[3]), "," => ";") *
-                                        "," *
-                                        string(k[2]) *
-                                        "," *
-                                        string(k[1]) *
-                                        "," *
-                                        string(data[k]),
-                                    )
+                                    println(f, join([i, (j + parameters.initial_stage - 2) % WEEKSPERYEAR + 1, time.year, time.week, s, 
+                                                     replace(string(k[3]), "," => ";"), k[2], k[1], data[k]], ","))
                                 end
                             else
-                                println(
-                                    f,
-                                    temp * "," * string(k) * ",-,-," * string(data[k]),
-                                )
+                                println(f, join([temp,k,"-,-", data[k]], ","))
                             end
                         end
                     else
-                        println(f, temp * ",-,-,-," * string(data))
+                        println(f, join([temp, "-,-,-", data], ","))
                     end
                 end
                 time += 1
@@ -590,10 +367,8 @@ function output_tidy_results(
 end
 
 function write_DOASA_cuts(sddpm::SDDP.PolicyGraph, d::JADEData, path::String)
-    if !ispath(path)
-        mkpath(path)
-    end
-
+    !ispath(path) && mkpath(path)
+    
     for t in keys(sddpm.nodes)
         oracle = sddpm.nodes[t].bellman_function.global_theta
         states = sddpm.nodes[t].bellman_function.global_theta.states
@@ -605,14 +380,18 @@ function write_DOASA_cuts(sddpm::SDDP.PolicyGraph, d::JADEData, path::String)
         end
 
         for s in states
+            
             if findfirst("reslevel[", string(s)) != nothing
                 s_sym = Symbol(string(s)[10:end-1])
                 states_ordered[d.reservoirs[s_sym].index] = s
-            else
+
+            elseif findfirst("fuelstoragelevel[", string(s)) != nothing
+                s_sym = Symbol(string(s)[18:end-1])           # Get substring from fuelstoragelevel[GENE_GAS] => :GENE_GAS            
+                states_ordered[length(d.sets.RESERVOIRS) + findfirst(isequal(s_sym), d.sets.STORED_FUELS)] = s
+            
+            else # Not sure the use of this
                 s_sym = Symbol(string(s)[14:end-1])
-                states_ordered[length(
-                    d.sets.RESERVOIRS,
-                )+findfirst(isequal(s_sym), d.sets.STORED_FUELS)] = s
+                states_ordered[length(d.sets.RESERVOIRS,) + findfirst(isequal(s_sym), d.sets.STORED_FUELS)] = s
             end
         end
 
@@ -624,11 +403,6 @@ function write_DOASA_cuts(sddpm::SDDP.PolicyGraph, d::JADEData, path::String)
                 for s in states_ordered
                     print(f, "," * string(-oracle.cuts[k].coefficients[s]))
                 end
-                # if oracle.cuts[k].constraint_ref == nothing
-                #     println(f, ",removed")
-                # else
-                #     println(f, ",active")
-                # end
                 println(f, "")
             end
         end

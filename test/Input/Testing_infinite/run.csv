@@ -1,0 +1,30 @@
+Policy name,  "infinite_limited_fuel_initial"
+Problem start year, 2024
+Problem start week, 1
+Number of weeks, 52
+Use saved cuts from, "" 
+Maximum iterations, 2000
+ 
+Sample start year, 1932
+Sample end year, 2020
+Inflow correlation length, 4
+Steady state, 0.95
+ 
+Write EOH cuts file,TRUE 
+Load EOH cuts file,""
+ 
+Fraction of forward passes using Monte Carlo inflow sequences, 1
+Custom inflow sequences from, ""
+
+Simulation name, "simulation_week_1" 
+Simulation type, "Historical"
+Simulation start year,1932
+Simulation end year,2020
+Reset initial simulation state,TRUE
+Random seed, 2021
+ 
+LB flow penalty, 500
+UB flow penalty, 50
+ 
+Scale reservoirs, 1
+Scale objective, 1e+06

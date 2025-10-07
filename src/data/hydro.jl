@@ -8,19 +8,6 @@
 #--------------------------------------------------
 # Prepare reservoir-related data
 #--------------------------------------------------
-# Arcs in water network
-struct NaturalArc
-    minflow::Float64    # flow lower bound
-    maxflow::Float64    # flow upper bound
-    lb_penalty::Float64
-    ub_penalty::Float64
-end
-
-struct StationArc
-    maxflow::Float64    # spillway upper bound
-    penalty::Float64
-    station::Symbol     # name of the generator
-end
 
 struct ContingentTranche
     level::Float64
@@ -28,244 +15,227 @@ struct ContingentTranche
 end
 
 mutable struct Reservoir
-    capacity::TimeSeries{Float64}
-    initial::Float64
-    sp::Float64
-    contingent::TimeSeries{Vector{ContingentTranche}}
-    index::Int
+    capacity::TimeSeries{Float64}                      # consented capacity (Mil m3) of the reservoir may vary throughout the year.
+    initial::Float64                                   # reservoir's storage level (Mil m3) at the start of study period
+    sp::Float64                                        # reservoir's specific power factor (kWh/m3) is determined based on the SP values of downstream hydroelectric stations.
+    contingent::TimeSeries{Vector{ContingentTranche}}  # avaialble contingent storage and "penalty" cost to use it may vary throughtout the year
+    index::Int                                         # index assigned to a reservoir
 end
 
 """
     initialisereservoirs(file::String, limits::String)
 
-# Description
+    Description:
+    Initializes a dictionary of Reservoir objects using metadata and time series data from two CSV files:
+    1. One for basic reservoir info (reservoirs.csv)
+    2. One for time-varying limits and contingent storage (reservoir_limits.csv)
 
-Read list of reservoirs from `file`.
-Capacity and initial contents in Mm³.
-The columns MUST be ordered as shown below.
+    Inputs:
+    - reservoirs_filename::String: Path to the CSV file containing reservoir metadata.
+    - reservoir_limits_filename::String: Path to the CSV file containing time series data for reservoir limits and contingent storage.
 
-# Example File
-
-    RESERVOIR, INFLOW_REGION, CAPACITY, INI_STATE
-    Lake_Benmore, SI, 423451075.96799916, 322000320.233399
+    Outputs:
+    reservoirs::Dict{Symbol, Reservoir}: A dictionary mapping reservoir names to their corresponding Reservoir objects.
 """
-function initialisereservoirs(file::String, limits::String)
-    reservoirs = Dict{Symbol,Reservoir}()
-    parsefile(file) do items
-        @assert length(items) == 3 # must be 3 columns
-        if lowercase(items[1]) == "reservoir"
-            return
-        end
-        reservoir = str2sym(items[1])
+function initialisereservoirs(reservoirs_filename::String,reservoir_limits_filename::String)
+    reservoirs = Dict{Symbol,Reservoir}()  # Create an empty dictionary to store reservoirs
+
+        # Load reservoir metadata from "reservoirs.csv"
+    for row in CSV.Rows(reservoirs_filename; missingstring = "NA", stripwhitespace = true, comment = "%")
+
+        # Check if the format of "reservoir.csv" is valid
+        row = _validate_and_strip_trailing_comment(row, [:RESERVOIR, :INFLOW_REGION, :INI_STATE], [:CAPACITY])
+
+        # Converts the reservoir name to a Symbol and checks for duplicates.
+        reservoir = str2sym(row.RESERVOIR)
         if haskey(reservoirs, reservoir)
             error("Reservoir $(reservoir) given twice.")
         end
-        return reservoirs[reservoir] = Reservoir(
-            JADE.TimeSeries{Float64}(JADE.TimePoint(0, 0), []),   # capacity placeholder
-            parse(Float64, items[3]),   # initial state
-            0.0,                         # specific power
-            JADE.TimeSeries{Vector{ContingentTranche}}(JADE.TimePoint(0, 0), []),   # contingent placeholder
-            length(reservoirs) + 1, # index of reservoir, used to create compatible DOASA cut files
+
+        reservoirs[reservoir] = Reservoir(                               # Initializes a Reservoir object with:
+            TimeSeries{Float64}(TimePoint(0, 0), []),                    # placeholder for capacity time series.
+            parse(Float64, row.INI_STATE),                               # get initial storage level.
+            0.0,                                                         # specific power set to 0 for now to be replaced later.
+            TimeSeries{Vector{ContingentTranche}}(TimePoint(0, 0), []),  # placeholder for contingent time series.
+            length(reservoirs) + 1,                                      # index of reservoir, used to create compatible DOASA cut files.
         )
     end
 
-    limits, sym = gettimeseries(limits)
+    # Load reservoir limits time series
+    limits, column_names = gettimeseries(reservoir_limits_filename)
 
-    for (r, res) in reservoirs
-        temp = Float64[]
-        for i in 1:length(limits)
-            push!(temp, limits[i][Symbol(string(r) * " MAX_LEVEL")])
-        end
-        res.capacity = TimeSeries{Float64}(limits.startpoint, temp)
+    # For each reservoir
+    for (name, res) in reservoirs 
+        # Set capacity time series
+        res.capacity = TimeSeries{Float64}(limits.startpoint, [
+            limits[i][Symbol("$name MAX_LEVEL")] for i in 1:length(limits)
+        ])
 
-        temp = Vector{ContingentTranche}[]
-        j = 1
+        # Initialise contingent storage tranches
+        tranches = [ContingentTranche[] for i in 1:length(limits)]
+
+        # Initialise total contingent limit for reservoir for later validation check
         total = zeros(Float64, length(limits))
-        while Symbol(string(r) * " MIN_" * string(j) * "_LEVEL") ∈ sym || j == 1
-            if j > 1 && Symbol(string(r) * " MIN_" * string(j) * "_PENALTY") ∉ sym
-                error(string(r) * " contingent storage penalty missing")
-            end
-            for i in 1:length(limits)
-                limit = 0.0
-                if Symbol(string(r) * " MIN_" * string(j) * "_LEVEL") ∈ sym
-                    if j == 1
-                        push!(temp, ContingentTranche[])
-                        limit =
-                            -limits[i][Symbol(string(r) * " MIN_" * string(j) * "_LEVEL")]
-                    else
-                        total[i] =
-                            -limits[i][Symbol(string(r) * " MIN_" * string(j) * "_LEVEL")]
-                        limit =
-                            total[i] + limits[i][Symbol(
-                                string(r) * " MIN_" * string(j - 1) * "_LEVEL",
-                            )]
-                    end
 
-                    tranche = ContingentTranche(
-                        limit,
-                        limits[i][Symbol(string(r) * " MIN_" * string(j) * "_PENALTY")],
-                    )
-                    push!(temp[i], tranche)
-                else
-                    push!(temp, [ContingentTranche(0.0, 0.0)])
-                end
+        # If no contingent levels 1, add default tranche
+        if !(Symbol("$name MIN_1_LEVEL") in column_names)
+            for i in 1:length(limits)
+                push!(tranches[i], ContingentTranche(0.0, 0.0))
+            end
+        end
+
+        # Process contingent levels
+        j = 1
+        while Symbol("$name MIN_$(j)_LEVEL") in column_names
+            penalty_col = Symbol("$name MIN_$(j)_PENALTY")
+            level_col = Symbol("$name MIN_$(j)_LEVEL")
+            prev_level_col = Symbol("$name MIN_$(j-1)_LEVEL")
+
+            if !(penalty_col in column_names)
+                error("$name contingent storage missing MIN_$(j)_PENALTY")
+            end
+            # The logic in this loop is questionable - Tuong Nguyen
+            for i in 1:length(limits)
+                total[i] = -limits[i][level_col] + (j > 1 ? limits[i][prev_level_col] : 0.0)
+                push!(tranches[i], ContingentTranche(total[i], limits[i][penalty_col]))
             end
             j += 1
         end
-        total .-= minimum(total)
-        if maximum(total) >= 1E-8
-            error("The maximum contingent storage must be constant for each reservoir.")
+
+        if maximum(total) - minimum(total) >= 1e-8
+            @warn("The maximum contingent storage is not constant for reservoir $name.")
         end
 
-        if length(temp) != 0
-            res.contingent = TimeSeries{Vector{ContingentTranche}}(limits.startpoint, temp)
-        end
+        res.contingent = TimeSeries{Vector{ContingentTranche}}(limits.startpoint, tranches)
     end
+
     return reservoirs
 end
 
 #------------------------------------------------------
 # Flow arcs and hydro generator data
 #------------------------------------------------------
+# Arcs in water network
+struct NaturalArc
+    minflow::Float64        # flow lower bound
+    maxflow::Float64        # flow upper bound
+    lb_penalty::Float64     # flow lower bound violation penalty
+    ub_penalty::Float64     # flow upper bound violation penalty
+end
+
 """
     getnaturalarcs(file::String)
 
-# Description
+    # Description:
+    This function reads a CSV file (hydro_arcs.csv) containing natural water flow connections (like rivers or canals) between hydro stations.
+    It returns a dictionary mapping each origin-destination pair to a NaturalArc object, which holds flow constraints and penalties (optional).
 
-Read list of hydro station data from `file`.
-Canals, rivers, and other means of getting water from one place to another.
-Excludes power station turbines and spillways; those are covered in the hydro_stations file.
-Min/max flow in cumecs.
-NA in MIN_FLOW converted to 0.0
-NA in MAX_FLOW converted to 99999.0
-The columns MUST be ordered as shown below.
+    # Inputs:
+    filename::String: The path to the CSV file that contains the natural arc data.
 
-# Example File
+    # Outputs:
+    - arcs::Dict{NTuple{2,Symbol}, NaturalArc}: A dictionary where:
+        Key: A tuple of two Symbols representing the origin and destination nodes.
+        Value: A NaturalArc object containing flow constraints and penalties.
 
+    # Example File (The columns MUST be ordered as shown below.)
     ORIG,DEST,MIN_FLOW,MAX_FLOW
-    Lake_Wanaka,Lake_Dunstan, NA, NA
-    Lake_Hawea,Lake_Dunstan, 0.00, 99999
+    Clyde_tail,Lake_Roxburgh,66.25,na
+    Karapiro_tail,SEA,140.0,550.0
+
 """
-function getnaturalarcs(file::String)
-    natural_arcs = Dict{NTuple{2,Symbol},NaturalArc}()
-    parsefile(file, true) do items
-        if length(items) ∉ [4, 6]
-            error(
-                "hydro_arcs.csv should have 4 or 6 columns, " *
-                string(length(items)) *
-                " found",
-            )
+function getnaturalarcs(filename::String)
+    arcs = Dict{NTuple{2,Symbol},NaturalArc}()
+
+    for row in CSV.Rows(filename; missingstring = ["NA", "na", "default"], stripwhitespace = true, comment = "%")
+
+        row = _validate_and_strip_trailing_comment(row, [:ORIG, :DEST, :MIN_FLOW, :MAX_FLOW], [:LB_PENALTY, :UB_PENALTY])
+
+        key = (str2sym(row.ORIG), str2sym(row.DEST))
+        if haskey(arcs, key)
+            error("Arc $(key) given twice.")
         end
-        if lowercase(items[1]) == "orig"
-            return
-        end
-        od_pair = (str2sym(items[1]), str2sym(items[2]))
-        if haskey(natural_arcs, od_pair)
-            error("Arc $(od_pair) given twice.")
-        else
-            natural_arcs[od_pair] = NaturalArc(
-                (lowercase(items[3]) == "na") ? 0.0 : parse(Float64, items[3]),
-                (lowercase(items[4]) == "na") ? Inf : parse(Float64, items[4]),
-                (length(items) == 4 || lowercase(items[5]) == "default") ? -1.0 :
-                parse(Float64, items[5]),
-                (length(items) == 4 || lowercase(items[6]) == "default") ? -1.0 :
-                parse(Float64, items[6]),
-            )
-        end
+
+        minflow = parse(Float64, coalesce(row.MIN_FLOW, "0.0"))
+        maxflow = parse(Float64, coalesce(row.MAX_FLOW, "Inf"))
+        lb_penalty = parse(Float64, coalesce(get(row, :LB_PENALTY, missing), "-1"))
+        ub_penalty = parse(Float64, coalesce(get(row, :UB_PENALTY, missing), "-1"))
+
+        arcs[key] = NaturalArc(minflow, maxflow, lb_penalty, ub_penalty)
     end
-    return natural_arcs
+
+    return arcs
+end
+
+struct StationArc
+    maxflow::Float64    # Spillway max flow in cumecs (can be zero if no spillway exists, or "na" for unlimited spill).
+    penalty::Float64    # Penalty apply to over-spill
+    station::Symbol     # Name of the hydro station
 end
 
 # Hydro generators
 struct HydroStation
     node::Symbol
-    capacity::Float64
-    sp::Float64
-    omcost::Float64
-    arc::NTuple{2,Symbol}
+    capacity::Float64       # Capacity in MW
+    sp::Float64             # Specific power in MW/cumec;
+    omcost::Float64         # Operation and maintenance cost $/MWh
+    arc::NTuple{2,Symbol}   # Mapping water flow arcs (from one node to another).
 end
 
 """
-    gethydros(file::String)
+    gethydros(filename::String, nodes::Vector{Symbol})
 
-# Description
+    # Description:
+    This function reads hydroelectric station data from a CSV file (hydro_stations.csv) and constructs two dictionaries:
+    1. hydros: Maps generator symbols to HydroStation objects.
+    2. station_arcs: Maps water flow arcs (from one node to another) to StationArc objects.
 
-Read list of hydro station data from `file`.
-Capacity in MW;
-Specific power in MW/cumec;
-Spillway max flow in cumecs (can be zero if no spillway exists, or "na" for unlimited spill).
-The columns MUST be ordered as shown below.
+    # Inputs:
+    - filename::String: The path to the CSV file containing hydro station data.
+    - nodes::Vector{Symbol}: A list of valid power system nodes used to validate entries in the CSV.
 
-# Example File
+    # Outputs:
+    - hydros::Dict{Symbol, HydroStation}: A dictionary mapping generator names to their corresponding hydro station data.
+    - station_arcs::Dict{NTuple{2,Symbol}, StationArc}: A dictionary mapping water flow arcs to their associated station arc data.
 
+    # Example File:
     GENERATOR,HEAD_WATER_FROM,TAIL_WATER_TO,POWER_SYSTEM_NODE,CAPACITY,SPECIFIC_POWER,SPILLWAY_MAX_FLOW
     Arapuni,Lake_Arapuni,Lake_Karapiro,NI,196.7,0.439847649,99999
 """
-function gethydros(file::String, nodes::Vector{Symbol})
+function gethydros(filename::String, nodes::Vector{Symbol})
     hydros = Dict{Symbol,HydroStation}()
     station_arcs = Dict{NTuple{2,Symbol},StationArc}()
 
-    mode = -1
+    for row in CSV.Rows(filename; missingstring=["NA", "na", "default"], stripwhitespace=true, comment="%")
+        row = _validate_and_strip_trailing_comment(
+            row,
+            [:GENERATOR, :HEAD_WATER_FROM, :TAIL_WATER_TO, :POWER_SYSTEM_NODE, :CAPACITY, :SPECIFIC_POWER, :SPILLWAY_MAX_FLOW],
+            [:OM_COST, :OVERSPILL_PENALTY]
+        )
 
-    parsefile(file, true) do items
-        if length(items) ∉ [7, 8, 9]
-            error(
-                "hydro_stations.csv should have 7, 8, 9 columns, " *
-                string(length(items)) *
-                " found",
-            )
-        end
+        gen               = str2sym(row.GENERATOR)
+        arc               = (str2sym(row.HEAD_WATER_FROM), str2sym(row.TAIL_WATER_TO))
+        node              = str2sym(row.POWER_SYSTEM_NODE)
+        capacity          = parse(Float64, row.CAPACITY)
+        specific_power    = parse(Float64, row.SPECIFIC_POWER)
+        max_spill_flow    = parse(Float64, coalesce(row.SPILLWAY_MAX_FLOW, "Inf"))
+        om_cost           = parse(Float64, get(row, :OM_COST, "0.0"))
+        overspill_penalty = parse(Float64, get(row, :OVERSPILL_PENALTY, "-1"))
 
-        if lowercase(items[1]) == "generator"
-            if length(items) == 7
-                mode = 0
-            elseif length(items) == 8
-                if lowercase(items[8]) == "om_cost"
-                    mode = 1
-                elseif lowercase(items[8]) == "overspill_penalty"
-                    mode = 2
-                end
-            elseif length(items) == 9 &&
-                   lowercase(items[8]) == "om_cost" &&
-                   lowercase(items[9]) == "overspill_penalty"
-                mode = 3
-            end
-            if mode == -1
-                error(
-                    "Invalid column headings, if there are 8 or 9 columns the final two must be labelled 'om_cost' and 'overspill_penalty'",
-                )
-            end
-            return
-        end
-        generator = str2sym(items[1])
-        if haskey(hydros, generator)
-            error("Generator $(generator) given twice.")
-        end
-        station_arc = (str2sym(items[2]), str2sym(items[3]))
-        if str2sym(items[4]) in nodes
-            hydros[generator] = HydroStation(
-                str2sym(items[4]),
-                parse(Float64, items[5]),
-                parse(Float64, items[6]),
-                (mode == 0 || mode == 2) ? 0.0 : parse(Float64, items[8]),
-                station_arc,
-            )
-        else
-            error("Node " * items[4] * " for generator " * items[1] * " not found")
+        if haskey(hydros, gen)
+            error("Generator $gen given twice.")
+        elseif haskey(station_arcs, arc)
+            error("Station arc $arc already given.")
+        elseif !(node in nodes)
+            error("Node $node for generator $gen not found.")
         end
 
-        if haskey(station_arcs, station_arc)
-            error("Station arc $(station_arc) already given.")
-        else
-            spillwayflow =
-                station_arcs[station_arc] = StationArc(
-                    (lowercase(items[7]) == "na") ? Inf : parse(Float64, items[7]),
-                    (mode == 0 || mode == 1) ? -1.0 :
-                    ((mode == 2) ? parse(Float64, items[8]) : parse(Float64, items[9])),
-                    generator,
-                )
-        end
+        hydros[gen] = HydroStation(node,capacity,specific_power,om_cost,arc)
+
+        station_arcs[arc] = StationArc(max_spill_flow,overspill_penalty,gen)
+            
     end
+
     return hydros, station_arcs
 end
 
@@ -275,9 +245,19 @@ end
 """
     adjustinflows(inflow_file::String, rundata::RunData)
 
-# Description
+    # Description:
+    The adjustinflows function processes historical inflow data for multiple catchments 
+    and applies a statistical transformation (DIA) to produce adjusted inflow time series. 
+    This transformation is inspired by the methodology described in the DOASA model.
 
-This method applies DIA to the inflow file.
+    # Inputs:
+    - filename::String: The path to the CSV file containing inflow data (inflows.csv).
+    - rundata:: An object containing the JADE model settings, required to define the stage problems in SDDP.jl.
+
+    # Outputs:
+    - inflows::Dict{Symbol,TimeSeries{Float64}}: A dictionary mapping catchment names to their corresponding "adjusted" inflow data.
+    - first_inflows::Dict{Symbol,Float64}: A dictionary mapping catchment name to inflow of the start year and start week
+
 """
 function adjustinflows(inflow_file::String, rundata::RunData)
     if rundata.dialength >= 52
@@ -332,8 +312,8 @@ function adjustinflows(inflow_file::String, rundata::RunData)
         years = sort(unique([tp.year for tp in tps]))
         N = length(years)
         # Follow the steps in DOASA paper
-        α = [  # mean historical inflow
-            mean(inflow for (tp, inflow) in zip(tps, infl) if tp.week == t) for t in weeks
+        α = [  # mean weekly historical inflow
+            Statistics.mean(inflow for (tp, inflow) in zip(tps, infl) if tp.week == t) for t in weeks
         ]
         W = [] # rolling total inflow starting from week ty
         for ty in 1:length(infl)
@@ -345,13 +325,13 @@ function adjustinflows(inflow_file::String, rundata::RunData)
             end
         end
         m = [  # mean of the rolling inflow
-            mean(W[i] for (i, tp) in enumerate(tps) if tp.week == t) for t in weeks
+            Statistics.mean(W[i] for (i, tp) in enumerate(tps) if tp.week == t) for t in weeks
         ]
         d = [  # mean + the bigger deviation
             max(0.0, α[tp.week] + (W[i] - m[tp.week]) / √ω) for (i, tp) in enumerate(tps)
         ]
         d_mean = [  # mean of adjusted values
-            mean(d[i] for (i, tp) in enumerate(tps) if tp.week == t) for t in weeks
+            Statistics.mean(d[i] for (i, tp) in enumerate(tps) if tp.week == t) for t in weeks
         ]
         k = [  # adjusted inflows
             isnan(d[i] * α[tp.week] / d_mean[tp.week]) ? α[tp.week] :
@@ -363,27 +343,18 @@ function adjustinflows(inflow_file::String, rundata::RunData)
 end
 
 """
-    diatofile(
-        adjusted::Dict{Symbol,TimeSeries{Float64}},
-        outpath::String,
-        policy_dir::String,
-    )
+    diatofile(adjusted::Dict{Symbol,TimeSeries{Float64}}, outpath::String, policy_dir::String)
 
-# Description
+    # Description:
+    This function saves DIA adjusted inflows (created by the "adjustinflows" function) to `adjusted_inflows.csv`.
 
-This function saves DIA adjusted inflows to file.
-
-# Required Arguments
-  `adjusted` is the dictionary of DIA-adjusted inflows
-  `outpath` is the filename for adjusted inflows
-  `policy_dir` is the subdirectory where the outputs are stored
+    # Required Arguments
+    `adjusted` is the dictionary of DIA-adjusted inflows
+    `outpath` is the filename for adjusted inflows
+    `policy_dir` is the subdirectory where the outputs are stored
 """
-function diatofile(
-    adjusted::Dict{Symbol,TimeSeries{Float64}},
-    outpath::String,
-    policy_dir::String,
-)
-    outpath = joinpath(@JADE_DIR, "Output", outpath)
+function diatofile(adjusted::Dict{Symbol,TimeSeries{Float64}}, outpath::String, policy_dir::String)
+    outpath = joinpath(@__JADE_DIR__, "Output", outpath)
     if !ispath(joinpath(outpath, policy_dir))
         mkpath(joinpath(outpath, policy_dir))
     end
@@ -408,23 +379,38 @@ function diatofile(
     end
 end
 
-function getinflows(
-    adjusted::Dict{Symbol,TimeSeries{Float64}},
-    firstweekinflows::Dict{Symbol,Float64},
-    rundata::RunData,
-)
-    # A dictionary of inflow scenarios indexed by
-    #   the week of year and catchment
+"""
+    getinflows(adjusted::Dict{Symbol,TimeSeries{Float64}},firstweekinflows::Dict{Symbol,Float64},rundata::RunData)
+
+    # Description:
+    Constructs a weekly inflow dataset for multiple catchments across multiple scenarios, using historical data and optionally overriding the first week's inflow.
+
+    # Input:
+    - adjusted        :: A dictionary mapping catchment names (Symbol) to their adjusted inflow time series (TimeSeries{Float64}).
+    - firstweekinflows:: A dictionary mapping catchments to their inflow values at the start of the simulation.
+    - rundata         :: A struct containing metadata like sample years, number of scenarios, and whether the first week inflow is known.
+
+    # Output:
+    - An array of dictionaries. It's a 1D array with 52 elements (one for each week of the year).
+    - Each element is a dictionary mapping catchment names (Symbol) to a vector of inflow values (Vector{Float64}), one per scenario.
+"""
+function getinflows(adjusted::Dict{Symbol,TimeSeries{Float64}}, firstweekinflows::Dict{Symbol,Float64}, rundata::RunData)
+    # Creates an empty array of dictionaries. 
+    # Each element of the array will correspond to a week of the year.
+    # Each dictionary maps catchment names to vectors of inflow values (one per scenario).
     inflows = Dict{Symbol,Vector{Float64}}[]
+
     # Allocate storage
-    for week in 1:WEEKSPERYEAR
+    for week in 1:WEEKSPERYEAR  # For each week (1 to 52), creates a dictionary.
         push!(inflows, Dict{Symbol,Vector{Float64}}())
-        for l in keys(adjusted)
+        for l in keys(adjusted) # For each catchment l, initializes an empty vector to store inflows for that week.
             inflows[week][l] = Float64[]
         end
     end
 
+    # Populate Inflows from Sample Years
     for year in rundata.sample_years
+        # Defines the start and stop TimePoint for that year (week 1 to 52)
         samplestart = TimePoint(year, 1)
         samplestop = TimePoint(year, WEEKSPERYEAR)
 
@@ -452,13 +438,10 @@ function getinflows(
 end
 
 """
-Returns an inflow matrix (actually a vector) for a given year
+    getinflows_for_historical(inflowsfile::String, rundata::RunData, year::Union{Int,Vector{Int}})
+    This function is is a wrap around the "getinflows" function to get the actual histrorical inflow by setting dialenght = 1 (no DIA adjustment)
 """
-function getinflows_for_historical(
-    inflowsfile::String,
-    rundata::RunData,
-    year::Union{Int,Vector{Int}},
-)
+function getinflows_for_historical(inflowsfile::String, rundata::RunData, year::Union{Int,Vector{Int}})
     rd = deepcopy(rundata)
     rd.dialength = 1
     if typeof(year) == Int
@@ -472,49 +455,173 @@ function getinflows_for_historical(
     return getinflows(adjusted_inflows, firstweekinflows, rd)
 end
 
-function getSequences(file::String)
-    num_weeks = 0
-    sequences = Vector{Vector{Int}}()
-    parsefile(file, true) do items
-        if num_weeks == 0
-            num_weeks = length(items)
-        elseif num_weeks != length(items)
-            error("All custom inflows sequences must have the same length.")
+
+#---------------------------------------------------
+# Function to get reservoirs' specific power factors
+#---------------------------------------------------
+"""
+	out_neighbors(vertex::Symbol, edges::Vector{NTuple{2,Symbol}})
+    
+    # Purpose: 
+    This function finds all outgoing neighbors of a given vertex in a directed graph.
+
+    # Inputs:
+    - vertex ::Symbol                  : The node whose outgoing neighbors you want to find.
+    - edges  ::Vector{NTuple{2,Symbol}}: A list of directed edges, where each edge is a tuple (from, to).
+
+    # Output:
+    - Returns a list of all nodes that are directly reachable from vertex.
+"""
+function out_neighbors(vertex::Symbol, edges::Vector{NTuple{2,Symbol}})
+    neighbors = Symbol[]
+    for e in edges
+        if e[1] == vertex
+            push!(neighbors, e[2])
         end
-        sequence = Vector{Int}()
-        for i in 1:num_weeks
-            push!(sequence, parse(Int, items[i]))
-        end
-        return push!(sequences, sequence)
     end
-    println(sequences)
-    return sequences
+    return neighbors
 end
 
-#---------------------------------------------------
-# Get terminal water value
-#---------------------------------------------------
-function set_reservoir_sp!(
-    reservoirs::Dict{Symbol,Reservoir},
-    hydros::Dict{Symbol,HydroStation},
-    sets::Sets,
-    station_arcs::Dict{NTuple{2,Symbol},StationArc},
-)
-    # Compute which hydro stations are downstream from each reservoir
-    reservoir_has_downstream = hasdownstream(sets, station_arcs)
+"""
+    hasdownstream(sets::Sets, station_arcs::Dict{NTuple{2,Symbol},StationArc})
+
+    # Purpose:
+    This function determines which hydro stations are downstream of each reservoir, based on a network of catchments and arcs.
+
+    # Inputs:
+    sets        ::Sets                              : A structure containing sets of catchments, reservoirs, arcs, etc.
+    station_arcs::Dict{(Symbol, Symbol), StationArc}: Maps arcs to hydro station metadata.  
+
+    # Output:
+    Returns a dictionary ::Dict{Symbol, Vector{Symbol}} where each key is a reservoir, and the value is a list of hydro stations downstream from it.
+
+"""
+function hasdownstream(sets::Sets, station_arcs::Dict{NTuple{2,Symbol},StationArc})
+
+    @assert !isempty(sets.RESERVOIRS)
+    @assert !isempty(sets.STATION_ARCS)
+    
+    reverseflow = Symbol[] # Currently unused
+
+    # Filter out reverse flow station arcs (no effect currently)
+    station_arcs_filtered = Dict(filter(((pair, arc),) -> arc.station ∉ reverseflow, station_arcs))
+
+    # All arcs put together
+    arcs = union(sets.NATURAL_ARCS, sets.STATION_ARCS)
+
+    # Remove arcs associated with reverse flow stations (no effect currently)
+    for (pair, arc) in station_arcs
+        if arc.station in reverseflow
+            filter!(x -> x != pair, arcs)
+        end
+    end
+    
+    # Build downstream neighbor map
+    neighbors = Dict(c => out_neighbors(c, arcs) for c in sets.CATCHMENTS)
+    
+    # Identify valid catchments
+    catchments = [c for c in sets.CATCHMENTS if !isempty(neighbors[c]) || c == :SEA]
+  
+    # Identify valid reservoirs
+    reservoirs = [r for r in sets.RESERVOIRS if (r in sets.CATCHMENTS && !isempty(neighbors[r])) || r ∉ sets.CATCHMENTS]
+
+    # Dictionary structure to store which stations each reservoir has downstream
+    reservoir_has_downstream = Dict{Symbol,Array{Symbol}}()
+
+    # For every reservoir, we do a depth-first search (DFS) to look for hydro-stations downstream.
+    for r in reservoirs
+
+        # Creates a dictionary node_col to track the state of each catchment during DFS:
+        # 0 = white (unvisited)
+        # 1 = grey (visited but not fully explored)
+        # 2 = black (fully explored)
+        node_col = Dict(c => 0 for c in catchments)
+        current = r            # Sets the current node to the reservoir r. This is the starting point for DFS.
+        node_col[current] = 1  # Marks the starting reservoir as grey, indicating it's being visited.
+        theList = Symbol[]     # Initializes an empty list to store hydro stations found downstream of this reservoir.
+        grey_stack = [r]       # Initializes a stack for DFS traversal. Starts with the reservoir r.
+
+        # Start/continue a depth first search (DFS) as long as there are nodes in the grey_stack.
+        while !isempty(grey_stack)
+            current = grey_stack[end]    # Gets the top of the stack (last element) — the current node being explored.
+
+            if current == :SEA           # If the current node is the special terminal node :SEA:
+                node_col[current] = 2    # Mark it as black (fully explored).
+                pop!(grey_stack)         # Remove it from the stack.
+                continue                 # Skip to the next "while" iteration.
+            end
+
+            moved_down = false           # Flag to track whether we moved deeper into the graph during this iteration.
+            for n in neighbors[current]  # Loops over all downstream neighbors of the current catchment.
+                thearc = (current, n)    # Defines the arc (edge) from current to neighbor n.
+
+                if haskey(station_arcs_filtered, thearc)              # Checks if this arc corresponds to a hydro station.
+                    station = station_arcs_filtered[thearc].station   # Gets the station associated with this arc.
+                    if station ∉ theList && station ∉ reverseflow     # If the station hasn't been added yet and isn't in the reverse flow list (which is empty in this case)
+                        push!(theList, station)                       # add it to theList.
+                    end
+                end
+
+                if node_col[n] == 0       # If the neighbor n hasn't been visited yet:
+                    node_col[n] = 1       # Mark it as grey.
+                    push!(grey_stack, n)  # Push it onto the grey_stack.
+                    moved_down = true     # Set moved_down = true to indicate we went deeper.
+                    break                 # break out of for loop to explore this new node next.
+                end
+            end
+
+            if !moved_down                # If we didn’t go deeper (i.e., all neighbors are visited):
+                node_col[current] = 2     # Mark current as black (fully explored).
+                pop!(grey_stack)          # Pop it from the stack to backtrack.
+            end
+        end
+        reservoir_has_downstream[r] = theList # After DFS completes for reservoir r, store the list of downstream stations in the result dictionary.
+
+    end # next reservoir
+
+    return reservoir_has_downstream
+end
+
+
+"""
+    set_reservoir_sp!(reservoirs::Dict{Symbol,Reservoir}, hydros::Dict{Symbol,HydroStation},
+                      sets::Sets, station_arcs::Dict{NTuple{2,Symbol},StationArc})
+    # Purpose:
+    This function calculate the specific factors of reservoirs as the sum of downstrean stations' specific power factors
+
+    # Inputs:
+    reservoirs::Dict{Symbol,Reservoir}              : A dictionary mapping reservoir names to their corresponding Reservoir objects.
+    hydros::Dict{Symbol,HydroStation}               : A dictionary mapping generator names to their corresponding hydro station data.
+    sets        ::Sets                              : A structure containing sets of catchments, reservoirs, arcs, etc.
+    station_arcs::Dict{(Symbol, Symbol), StationArc}: Maps arcs to hydro station metadata.  
+
+    # Output:
+    Returns the dictionary reservoirs::Dict{Symbol,Reservoir} with updated specific power factor
+    
+"""
+function set_reservoir_sp!(reservoirs::Dict{Symbol,Reservoir}, hydros::Dict{Symbol,HydroStation},
+                           sets::Sets, station_arcs::Dict{NTuple{2,Symbol},StationArc})
+                           
+    # Get downstream hydro stations for each reservoir
+    downstream_stations = hasdownstream(sets, station_arcs)
 
     # Update the specific power of each reservoir:
-    #   conversion factor for m^3 -> MWh
-    for (name, reservoir) in reservoirs
-        if name ∈ keys(reservoir_has_downstream)
-            sp = sum(hydros[station].sp for station in reservoir_has_downstream[name])
-            reservoir.sp = sp / 3600
+    for (res_name, reservoir) in reservoirs
+        if haskey(downstream_stations, res_name)
+            total_sp = sum(hydros[station].sp for station in downstream_stations[res_name])
+            reservoir.sp = total_sp / 3600   # Convert from MW/cumec to MWh/m3
         else
             reservoir.sp = 0
         end
     end
 end
 
+
+#---------------------------------------------------
+# Get terminal water value
+#---------------------------------------------------
+
+# Defines a simple structure to represent a linear equation of the form: y = intercept + coefficient * x
 struct LinearEquation
     intercept::Float64
     coefficient::Float64
@@ -523,47 +630,46 @@ end
 """
     getterminalvalue(file::String)
 
-# Description
+    # Description:
+    This function reads data from a CSV file (terminal_water_value.csv) and returns a list of LinearEquation objects represent linear equations.
+    - Value of stored energy in hydro lakes at the end of the time horizon.
+    - STORED_ENERGY is the cumulative stored energy in GWh.
+    - VALUE is the marginal value in \$/MWh. This column should be a decreasing sequence.
 
-At the final stage terminal cost is a piecewise linear function of the national
-stored energy. We define a number of linear equations.
+    The columns MUST be ordered as shown below.
+        STORED_ENERGY, VALUE
+        1000, 137.218398630355   % first 1000 GWh is worth ~ \$137/MWh
+        1500, 85.9718321526058
 
-- Value of stored energy in hydro lakes at the end of the time horizon.
-- STORED_ENERGY is the cumulative stored energy in GWh.
-- VALUE is the marginal value in \$/MWh. This column should be a decreasing sequence.
-
-The columns MUST be ordered as shown below.
-
-# Example File
-
-    STORED_ENERGY, VALUE
-    1000, 137.218398630355   % first 1000 GWh is worth ~ \$137/MWh
-    1500, 85.9718321526058
+    # Inputs: 
+    filename::String: The path to the CSV file containing terminal water value data.
+    
+    # Outputs: 
+    A list of LinearEquation objects.
 """
 function getterminalvalue(file::String)
-    terminal_equations = LinearEquation[]
-    current_value = 0.0
-    current_energy = 0.0
+    equations = LinearEquation[]  # stores the resulting linear segments.
+    cumulative_value = 0.0        # tracks the accumulated value across energy segments.
+    previous_energy  = 0.0        # stores the energy value from the previous row.
     parsefile(file, true) do items
-        @assert length(items) == 2
-        if lowercase(items[1]) == "stored_energy"
+        @assert length(items) == 2                # Ensures each row has two columns.
+
+        # Header Check
+        if lowercase(items[1]) == "stored_energy" # Skips the header row.
             return
         end
-        energy = 1000.0 * parse(Float64, items[1]) # GWh -> MWh conversion
-        value = parse(Float64, items[2])
 
-        # equation: y = current_value + (x - energy) * value
-        #   intercept   = curent_value - energy * value
-        #   coefficient = value
-        push!(
-            terminal_equations,
-            LinearEquation(current_value - current_energy * value, value),
-        )
-        current_value += (energy - current_energy) * value
-        return current_energy = energy
+        # Data Conversion
+        energy = 1000.0 * parse(Float64, items[1]) # GWh -> MWh conversion
+        value = parse(Float64, items[2])           # $/MWh
+
+        # Equation Construction: y = cumulative_value + (x - previous_energy) * value
+        intercept = cumulative_value - previous_energy * value  # Calculates the intercept for the linear segment 
+        push!(equations, LinearEquation(intercept, value))      # and stores it.
+
+        # Update Accumulated Value
+        cumulative_value += (energy - previous_energy ) * value
+        previous_energy  = energy
     end
-    return [
-        LinearEquation(eqn.intercept - current_value, eqn.coefficient) for
-        eqn in terminal_equations
-    ]
+    return [LinearEquation(eqn.intercept - cumulative_value, eqn.coefficient) for eqn in equations]
 end

@@ -1,0 +1,9 @@
+% Initial storage in (TJ)
+% Capacity in (TJ) - ignore this if we only model the total avaialble fuel.
+% Max Injection in (TJ/week) - ignore this if we only model the total avaialble fuel.
+% Max Withdraw in (TJ/week) - ignore this if we only model the total avaialble fuel.
+FUELSTORAGE,INITIAL,CAPACITY,MAX_INJECTION,MAX_WITHDRAW
+GENE_coal,23500,23500,na,na
+GENE_gas,14389,14389,na,na
+CTCT_gas,13294,13294,na,na
+TODD_gas,8787,8787,na,na
