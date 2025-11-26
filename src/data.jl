@@ -372,7 +372,7 @@ mutable struct JADEData
     thermal_stations::Dict{Symbol,ThermalStation}
     fuel_storages::Dict{Symbol,FuelStorage}
     thermal_to_storage::Dict{Symbol,Symbol}
-    fuel_contracts::TimeSeries{Dict{Symbol,Float64}}
+    fuel_contracts::TimeSeries{Dict{Symbol,FuelContract}}
     hydro_stations::Dict{Symbol,HydroStation}
     reservoirs::Dict{Symbol,Reservoir}
     fuel_costs::TimeSeries{Dict{Symbol,Float64}}

@@ -390,17 +390,17 @@ function JADEsddp(d::JADEData, optimizer = nothing)
         JuMP.@constraints(
             md,
             begin
-                # Fuel use/storage balance constraints
+                # Fuel use/storage balance constraints (TJ)
                 fuelUseBalance[sf in s.STORED_FUELS],
                 fuel_contract[sf] + fuel_withdrawal[sf] - fuel_injection[sf] >= fuel_use_TJ[sf]
 
-                # Fuel contracts
+                # Fuel contracts(TJ)
                 fuelContractDelivery[sf in s.STORED_FUELS],
-                fuel_contract[sf] == d.fuel_contracts[timenow][sf] 
-                
-                # Conservation for fuel storages
+                d.fuel_contracts[timenow][sf].mindelivery <= fuel_contract[sf] <= d.fuel_contracts[timenow][sf].maxdelivery
+
+                # Conservation for fuel storages (TJ)
                 fuelStorageBalance[sf in s.STORED_FUELS],
-                fuelstoragelevel[sf].out - fuelstoragelevel[sf].in == fuel_injection[sf] - fuel_withdrawal[sf]
+                fuelstoragelevel[sf].out - fuelstoragelevel[sf].in == (fuel_injection[sf] - fuel_withdrawal[sf])*1e-3
             end
         )
     end
