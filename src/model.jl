@@ -361,7 +361,7 @@ function JADEsddp(d::JADEData, optimizer = nothing)
         # ------------------------------------------------------------------------
         JuMP.@variable(
             md,
-            0 <= fuelstoragelevel[stg in s.STORED_FUELS] <=                             # a state variable representing the fuel (PJ) in storage stg at the current stage.
+            0 <= fuelstoragelevel[stg in s.STORED_FUELS] <=                             # a state variable representing the fuel (TJ) in storage stg at the current stage.
             d.fuel_storages[stg].capacity,                  
             SDDP.State,                                                                 # keyword SDDP.State provided by the SDDP.jl package. It tells the model that the variable being declared is a state variable in a multi-stage stochastic optimization problem.
             initial_value = d.fuel_storages[stg].initial                                # Sets the starting fuel level for each storage.
