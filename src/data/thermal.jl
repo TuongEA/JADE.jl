@@ -25,6 +25,11 @@ struct FuelStorage
     maxwithdrawal::Float64 # maximum weekly withdrawal (TJ/week)
 end
 
+struct FuelContract
+    mindelivery::Float64   # minimum fuel delivery (TJ/week)
+    maxdelivery::Float64   # maximum fuel delivery (TJ/week)
+end
+
 """
     getthermalstations(file::String, nodes::Vector{Symbol})
 
@@ -116,22 +121,42 @@ end
 
 
 function getfuelcontracts(filename::String)
+    # thermal_stations = Dict{Symbol,ThermalStation}()
     start_time = nothing
-    data = Dict{Symbol, Float64}[]
+
+    data = Dict{TimePoint, Dict{Symbol, FuelContract}}()
+    fuelstorages = Symbol[]                                       # List of fuel storages(e.g., :GENE_coal, GENE_gas, CTCT:gas, :TODD_gas).
+    starttime = 0
+ 
     rows = CSV.Rows(filename; missingstring = ["NA", "na", "default"],stripwhitespace = true, comment = "%" )
     for row in rows
-        time = TimePoint(parse(Int, row.YEAR), parse(Int, row.WEEK))
-        if isempty(data)
-            start_time = time
-        elseif time != start_time + length(data)
-            error("Weeks in $filename must be contiguous")
-        end
-        d = Dict{Symbol,Float64}(str2sym("$k") => parse(Float64, row[k]) for k in CSV.getnames(row) if !(k in (:YEAR, :WEEK)))
-        push!(data, d)
-    end
-    return TimeSeries{Dict{Symbol,Float64}}(start_time, data)
-end
+        row = _validate_and_strip_trailing_comment(row,  [:YEAR, :WEEK, :FUEL_STORAGE, :MIN, :MAX])
 
+        timepoint = TimePoint(parse(Int, row.YEAR), parse(Int, row.WEEK))
+        if length(data) == 0                           # First data row will contain start year and start week 
+           starttime = timepoint
+        end
+        
+        # checks whether the dictionary data already contains an entry for the key timepoint. 
+        if !haskey(data, timepoint) # If it does not, it creates a new entry with that key 
+            data[timepoint] = Dict{Symbol,FuelContract}() # and assigns it an empty dictionary.
+        end
+
+        # Stores constract min,max values for each fuel storage at the given timepoint.
+        fuelstorage = str2sym(row.FUEL_STORAGE)
+        data[timepoint][fuelstorage] = FuelContract(parse(Float64, row.MIN),parse(Float64, row.MAX))
+        
+    end
+
+    # Collects and sorts timepoints.
+    tps, vals = collect(keys(data)), collect(values(data))
+    p = sortperm(tps)
+
+    # Constructs a TimeSeries object starting from the first timepoint.
+    fuelcontracts = TimeSeries{Dict{Symbol,FuelContract}}( starttime, vals[p] )
+
+    return fuelcontracts
+end
 
 
 """
